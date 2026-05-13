@@ -1,316 +1,314 @@
+/*
+  ESP32-C3 Charger - Improved with PI controller and anti-windup.
+*/
+
 #include <Arduino.h>
-#include <Wire.h> // Required for I2C communication with the OLED display
-#include <Adafruit_GFX.h> // Core graphics library
-#include <Adafruit_SSD1306.h> // Specific library for SSD1306 OLED displays
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 
 // --- OLED Display Configuration ---
-// The user specified a 72x40 OLED. Adafruit_SSD1306 typically supports 128x64 or 128x32.
-// We'll use 128x64 as a common default, which should work for most small OLEDs,
-// even if the visible area is smaller. You may need to adjust SCREEN_WIDTH/HEIGHT
-// or the display address (0x3C or 0x3D) based on your specific 72x40 OLED module.
-#define SCREEN_WIDTH 128 // OLED display width, in pixels (common for SSD1306)
-#define SCREEN_HEIGHT 64 // OLED display height, in pixels (common for SSD1306)
-
-// Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
-#define OLED_RESET -1 // Reset pin # (or -1 if sharing Arduino reset pin)
-#define SCREEN_ADDRESS 0x3C // I2C address for 128x64 OLED (common)
-
-// Create the display object
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+#define SCREEN_ADDRESS 0x3C
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+bool oledAvailable = false;
 
-// --- Pin Definitions ---
-// GPIO10: PWM output for controlling the step-up (boost) converter.
-// This pin will drive the gate of a MOSFET in your boost converter circuit.
-const int PWM_OUT_PIN = 10;
+// --- Pin Definitions (GPIO numbers) ---
+const int PWM_OUT_PIN = 10;               // LEDC PWM output to MOSFET gate
+const int BAT_VOLTAGE_SENSE_PIN = 0;      // ADC input for battery voltage (GPIO number)
+const int CURRENT_SENSE_AMP_PIN = 1;      // ADC input for ACS712 output (GPIO number)
+const int DESIRED_VOLTAGE_SET_PIN = 2;    // ADC input for setpoint pot (voltage)
+const int DESIRED_CURRENT_SET_PIN = 3;    // ADC input for setpoint pot (current)
+const int CHARGED_INDICATOR_PIN = 9;      // Digital output indicator (LED)
 
-// Analog Input Pins (ADC1 channels on ESP32-C3)
-// GPIO0: Analog input for sensing the battery voltage.
-// Connect this to a voltage divider that scales the battery voltage down to 0-3.3V.
-const int BAT_VOLTAGE_SENSE_PIN = 0; // ADC1_CH0
+// --- PWM (LEDC) settings ---
+const int PWM_CHANNEL = 0;
+const int PWM_FREQ = 50000;    // 50 kHz
+const int PWM_RESOLUTION = 10; // bits (0..1023)
+const int MAX_PWM_DUTY = (1 << PWM_RESOLUTION) - 1;
 
-// GPIO1: Analog input for reading the current from a current sensing amplifier.
-// Connect this to the output of your current sensor (e.g., ACS712, INA219 output to ADC).
-// Ensure the output voltage range of the amplifier is compatible with ESP32's 0-3.3V ADC.
-const int CURRENT_SENSE_AMP_PIN = 1; // ADC1_CH1
+// --- ADC / Sampling ---
+const float ADC_MAX_VOLTAGE = 3.3f;  // Vref
+const float ADC_MAX_READING = 4095.0f; // 12-bit
+const int ADC_SAMPLES = 16;
+const int CALIBRATION_SAMPLES = 100;
 
-// GPIO2: Analog input for setting the desired final charge voltage.
-// Connect this to a potentiometer or another voltage source (0-3.3V) that sets the target.
-const int DESIRED_VOLTAGE_SET_PIN = 2; // ADC1_CH2
+// --- Calibration ---
+const float VOLTAGE_DIVIDER_RATIO = 9.33f;
+const float ACS712_SENSITIVITY = 0.185f;
 
-// GPIO3: Analog input for setting the desired charging current limit.
-// Connect this to a potentiometer or another voltage source (0-3.3V) that sets the limit.
-const int DESIRED_CURRENT_SET_PIN = 3; // ADC1_CH3
-
-// Digital Output Pin
-// GPIO9: Indicator pin, set HIGH when charging is complete.
-const int CHARGED_INDICATOR_PIN = 9;
-
-// --- PWM Settings for Boost Converter Control ---
-// LEDC (LED Controller) on ESP32 is used for PWM generation.
-const int PWM_CHANNEL = 0; // Use LEDC channel 0
-const int PWM_FREQ = 50000; // PWM frequency in Hz (50 kHz is common for boost converters)
-const int PWM_RESOLUTION = 10; // 10-bit resolution (0 to 1023 duty cycle values)
-const int MAX_PWM_DUTY = (1 << PWM_RESOLUTION) - 1; // Maximum duty cycle value (1023 for 10-bit)
-
-// --- Calibration Constants ---
-// These values are CRITICAL and MUST be calibrated for your specific hardware setup.
-// Incorrect calibration will lead to inaccurate voltage/current readings and charging behavior.
-
-// ESP32 ADC reference voltage (typically 3.3V for 12-bit ADC readings 0-4095)
-const float ADC_MAX_VOLTAGE = 3.3;
-const float ADC_MAX_READING = 4095.0; // 12-bit ADC resolution
-
-// Example Calibration Factors (PLACEHOLDERS - YOU MUST CALIBRATE THESE!)
-// To calibrate:
-// 1. Measure a known voltage/current with a multimeter.
-// 2. Read the raw ADC value from the ESP32.
-// 3. Calculate the factor: Factor = (Known_Value / Raw_ADC_Value) * ADC_MAX_READING / ADC_MAX_VOLTAGE
-//    Or, if you know your voltage divider ratio (R_total / R_low):
-//    VOLTAGE_SENSE_FACTOR = (ADC_MAX_VOLTAGE / ADC_MAX_READING) * Voltage_Divider_Ratio;
-//    Example: For a 30V max battery, if your divider outputs 3.0V at 30V, ratio is 10.
-//    So, VOLTAGE_SENSE_FACTOR = (3.3 / 4095.0) * 10.0;
-const float VOLTAGE_SENSE_FACTOR = (ADC_MAX_VOLTAGE / ADC_MAX_READING) * 9.33; // Placeholder: Example for a 100k/12k divider (ratio ~9.33) for max 30V
-const float CURRENT_SENSE_FACTOR = (ADC_MAX_VOLTAGE / ADC_MAX_READING) * (1.0 / 0.185); // Placeholder: Example for ACS712-20A (185mV/A sensitivity)
-const float SET_VOLTAGE_FACTOR = (ADC_MAX_VOLTAGE / ADC_MAX_READING) * (30.0 / 3.3); // Placeholder: Maps 0-3.3V pot input to 0-30V target
-const float SET_CURRENT_FACTOR = (ADC_MAX_VOLTAGE / ADC_MAX_READING) * (5.0 / 3.3); // Placeholder: Maps 0-3.3V pot input to 0-5A limit
+const float ADC_V_PER_COUNT = (ADC_MAX_VOLTAGE / ADC_MAX_READING);
+const float VOLTAGE_SENSE_FACTOR = ADC_V_PER_COUNT * VOLTAGE_DIVIDER_RATIO;
+const float CURRENT_RAW_TO_A = ADC_V_PER_COUNT / ACS712_SENSITIVITY;
 
 // --- Charger State Machine ---
-// Defines the different operational states of the battery charger.
-enum ChargerState_t {
-    IDLE,                 // Charger is off, waiting to start.
-    CHARGING,             // Actively charging the battery (Constant Current or Constant Voltage).
-    PAUSED_CHECK_VOLTAGE, // Charging paused temporarily to get an accurate battery voltage reading.
-    CHARGED_COMPLETE      // Battery has reached the desired final voltage, charging is stopped.
-};
+enum ChargerState_t { IDLE, CHARGING, PAUSED_CHECK_VOLTAGE, CHARGED_COMPLETE };
+ChargerState_t chargerState = IDLE;
 
-ChargerState_t chargerState = IDLE; // Initial state of the charger
+// --- Global Variables ---
+float batteryVoltage = 0.0f;
+float batteryVoltageFiltered = 0.0f;
+float chargingCurrent = 0.0f;
+float chargingCurrentFiltered = 0.0f;
+float desiredFinalVoltage = 29.0f;
+float desiredCurrentLimit = 1.0f;
+int currentPwmDutyCycle = 0;
 
-// --- Global Variables for Readings and Settings ---
-float batteryVoltage = 0.0;     // Current measured battery voltage
-float chargingCurrent = 0.0;    // Current measured charging current
-float desiredFinalVoltage = 0.0; // Target voltage set by analog input (26-30V)
-float desiredCurrentLimit = 0.0; // Max current limit set by analog input
-int currentPwmDutyCycle = 0;    // The current PWM duty cycle applied to the boost converter
+int currentSensorOffsetRaw = 2048;
 
-// --- Timers for Charging Logic ---
-unsigned long lastChargeCheckTime = 0; // Stores the last time a voltage check was performed
-const unsigned long CHARGE_CHECK_INTERVAL_MS = 30000; // 30 seconds (30,000 milliseconds)
+// --- Timing ---
+unsigned long lastChargeCheckTime = 0;
+const unsigned long CHARGE_CHECK_INTERVAL_MS = 30000UL;
+unsigned long pausedStartTime = 0;
+const unsigned long PAUSE_SETTLE_MS = 1000UL;
 
-// --- PWM Control Parameters ---
-// These gains are for a simple proportional control for current limiting and voltage regulation.
-// They will likely require tuning for stable operation of your boost converter.
-const float KP_CURRENT = 0.5; // Proportional gain for current control (adjusts PWM based on current error)
-const float KP_VOLTAGE = 0.5; // Proportional gain for voltage control (adjusts PWM based on voltage error)
+// --- PI Controller parameters ---
+float KP_CC = 15.0f;
+float KI_CC = 4.0f;
+float KP_CV = 8.0f;
+float KI_CV = 1.5f;
 
-// Target PWM duty cycle for achieving 30V output in open-loop (without current limiting).
-// This is the maximum duty cycle the charger will try to reach if not current-limited.
-// YOU MUST CALIBRATE THIS VALUE for your specific boost converter to achieve approx. 30V output.
-const int TARGET_30V_PWM_DUTY = 800; // Placeholder: Adjust this value during calibration!
+float integralCC = 0.0f;
+float integralCV = 0.0f;
 
-// --- Function Prototypes ---
-void readSensorInputs();      // Reads all analog sensor values and converts them
-void updateChargerState();    // Implements the state machine logic
-void updateOLED();            // Updates the OLED display with current status
-void setPwmDutyCycle(int dutyCycle); // Sets the PWM duty cycle for the boost converter
+// Safety
+const float MAX_ALLOWED_CURRENT_MULTIPLIER = 2.0f;
 
-// --- Setup Function: Runs once when the ESP32 starts ---
+// Filters
+const float FILTER_ALPHA_V = 0.2f;
+const float FILTER_ALPHA_I = 0.2f;
+
+// Function prototypes
+void readSensorInputs();
+void updateChargerState();
+void updateOLED();
+void setPwmDutyCycle(int dutyCycle);
+int analogReadAveraged(int pin);
+void calibrateCurrentSensor(bool verbose = true);
+void enableOledOrWarn();
+int piController(float error, float &integral, float kp, float ki);
+
+// ---------------------- PI Controller ----------------------
+int piController(float error, float &integral, float kp, float ki) {
+    integral += ki * error;
+
+    // Anti-windup: clamp integral to PWM range
+    if (integral > MAX_PWM_DUTY) integral = (float)MAX_PWM_DUTY;
+    else if (integral < 0) integral = 0;
+
+    float u = kp * error + integral;
+    return constrain((int)u, 0, MAX_PWM_DUTY);
+}
+
+// ---------------------- Setup ----------------------
 void setup() {
-    Serial.begin(115200); // Initialize serial communication for debugging
-    Serial.println("ESP32-C3 Li-ion Charger Initializing...");
+  Serial.begin(115200);
+  delay(10);
+  Serial.println("\n=== ESP32 Charger Improved ===");
 
-    // Configure the CHARGED_INDICATOR_PIN as an output
-    pinMode(CHARGED_INDICATOR_PIN, OUTPUT);
-    digitalWrite(CHARGED_INDICATOR_PIN, LOW); // Ensure indicator is off initially
+  pinMode(CHARGED_INDICATOR_PIN, OUTPUT);
+  digitalWrite(CHARGED_INDICATOR_PIN, LOW);
 
-    // Configure PWM for the boost converter
-    ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RESOLUTION); // Set up LEDC channel
-    ledcAttachPin(PWM_OUT_PIN, PWM_CHANNEL);         // Attach PWM channel to the output pin
-    setPwmDutyCycle(0); // Start with PWM off to ensure no immediate output
+  ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttachPin(PWM_OUT_PIN, PWM_CHANNEL);
+  setPwmDutyCycle(0);
 
-    // Initialize OLED display
-    // Wire.begin(SDA_PIN, SCL_PIN) sets the I2C pins.
-    // For ESP32-C3, common I2C pins are GPIO8 (SDA) and GPIO7 (SCL).
-    Wire.begin(8, 7); // SDA on GPIO8, SCL on GPIO7
-    if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-        Serial.println(F("SSD1306 allocation failed. Check wiring and address!"));
-        for (;;); // If OLED fails to initialize, halt execution.
-    }
+  #if defined(ARDUINO_ARCH_ESP32) || defined(ESP32)
+      analogReadResolution(12);
+      analogSetPinAttenuation(BAT_VOLTAGE_SENSE_PIN, ADC_ATTEN_DB_11);
+      analogSetPinAttenuation(CURRENT_SENSE_AMP_PIN, ADC_ATTEN_DB_11);
+      analogSetPinAttenuation(DESIRED_VOLTAGE_SET_PIN, ADC_ATTEN_DB_11);
+      analogSetPinAttenuation(DESIRED_CURRENT_SET_PIN, ADC_ATTEN_DB_11);
+  #endif
 
-    // Display initial message on OLED
-    display.display(); // Clear buffer and display initial content (usually blank)
-    delay(2000); // Pause for 2 seconds
-    display.clearDisplay(); // Clear the buffer
-    display.setTextSize(1); // Set text size (1 is smallest)
-    display.setTextColor(SSD1306_WHITE); // Set text color
-    display.setCursor(0, 0); // Set cursor to top-left corner
-    display.println("Charger Ready!");
-    display.display(); // Show the message
-    delay(1000); // Keep message on screen for 1 second
+  Wire.begin(8, 7);
+  enableOledOrWarn();
+
+  calibrateCurrentSensor(true);
+
+  readSensorInputs();
+  batteryVoltageFiltered = batteryVoltage;
+  chargingCurrentFiltered = chargingCurrent;
+
+  lastChargeCheckTime = millis();
 }
 
-// --- Loop Function: Runs repeatedly after setup() ---
 void loop() {
-    readSensorInputs();   // Read all analog sensors
-    updateChargerState(); // Execute the charger's state machine logic
-    updateOLED();         // Update the OLED display with current status
-    delay(100);           // Small delay to stabilize readings and update rates
-                          // Adjust this delay as needed for responsiveness vs. stability.
+  readSensorInputs();
+  updateChargerState();
+  updateOLED();
+
+  if (Serial.available()) {
+    char c = (char)Serial.read();
+    if (c == 'c' || c == 'C') calibrateCurrentSensor(true);
+  }
+  delay(50);
 }
 
-// --- Function to Read and Convert Sensor Inputs ---
+int analogReadAveraged(int pin) {
+  long sum = 0;
+  for (int i = 0; i < ADC_SAMPLES; ++i) {
+    sum += analogRead(pin);
+    delayMicroseconds(200);
+  }
+  return (int)(sum / ADC_SAMPLES);
+}
+
+void calibrateCurrentSensor(bool verbose) {
+  setPwmDutyCycle(0);
+  delay(1000);
+  long sum = 0;
+  for (int i = 0; i < CALIBRATION_SAMPLES; ++i) {
+    sum += analogRead(CURRENT_SENSE_AMP_PIN);
+    delay(2);
+  }
+  currentSensorOffsetRaw = (int)(sum / CALIBRATION_SAMPLES);
+  if (verbose) {
+    Serial.print("ACS712 Calibrated. Offset: "); Serial.println(currentSensorOffsetRaw);
+  }
+}
+
 void readSensorInputs() {
-    // Read raw 12-bit ADC values (0-4095)
-    int rawBatVoltage = analogRead(BAT_VOLTAGE_SENSE_PIN);
-    int rawCurrentSense = analogRead(CURRENT_SENSE_AMP_PIN);
-    int rawDesiredVoltage = analogRead(DESIRED_VOLTAGE_SET_PIN);
-    int rawDesiredCurrent = analogRead(DESIRED_CURRENT_SET_PIN);
+  int rawBat = analogReadAveraged(BAT_VOLTAGE_SENSE_PIN);
+  int rawI   = analogReadAveraged(CURRENT_SENSE_AMP_PIN);
+  int rawSetV = analogReadAveraged(DESIRED_VOLTAGE_SET_PIN);
+  int rawSetI = analogReadAveraged(DESIRED_CURRENT_SET_PIN);
 
-    // Convert raw ADC values to real-world units (Volts and Amperes)
-    batteryVoltage = rawBatVoltage * VOLTAGE_SENSE_FACTOR;
-    chargingCurrent = rawCurrentSense * CURRENT_SENSE_FACTOR;
+  batteryVoltage = rawBat * VOLTAGE_SENSE_FACTOR;
+  chargingCurrent = (rawI - currentSensorOffsetRaw) * CURRENT_RAW_TO_A;
 
-    // Convert desired settings from analog inputs
-    desiredFinalVoltage = rawDesiredVoltage * SET_VOLTAGE_FACTOR;
-    desiredCurrentLimit = rawDesiredCurrent * SET_CURRENT_FACTOR;
+  desiredFinalVoltage = rawSetV * ADC_V_PER_COUNT * (30.0f / 3.3f);
+  desiredCurrentLimit = rawSetI * ADC_V_PER_COUNT * (5.0f / 3.3f);
 
-    // Constrain desired values to safe and specified operating ranges
-    desiredFinalVoltage = constrain(desiredFinalVoltage, 26.0, 30.0); // Output voltage range 26V to 30V
-    desiredCurrentLimit = constrain(desiredCurrentLimit, 0.1, 5.0);   // Example: Current limit from 0.1A to 5.0A
-                                                                      // Adjust these limits based on your battery and charger capabilities.
+  desiredFinalVoltage = constrain(desiredFinalVoltage, 26.0f, 30.0f);
+  desiredCurrentLimit = constrain(desiredCurrentLimit, 0.1f, 5.0f);
+
+  batteryVoltageFiltered = (batteryVoltageFiltered * (1.0f - FILTER_ALPHA_V)) + (batteryVoltage * FILTER_ALPHA_V);
+  chargingCurrentFiltered = (chargingCurrentFiltered * (1.0f - FILTER_ALPHA_I)) + (chargingCurrent * FILTER_ALPHA_I);
 }
 
-// --- Function to Set PWM Duty Cycle ---
 void setPwmDutyCycle(int dutyCycle) {
-    // Ensure the duty cycle is within the valid range (0 to MAX_PWM_DUTY)
-    currentPwmDutyCycle = constrain(dutyCycle, 0, MAX_PWM_DUTY);
-    ledcWrite(PWM_CHANNEL, currentPwmDutyCycle); // Apply the duty cycle
+  currentPwmDutyCycle = constrain(dutyCycle, 0, MAX_PWM_DUTY);
+  ledcWrite(PWM_CHANNEL, currentPwmDutyCycle);
 }
 
-// --- Charger State Machine Logic ---
+bool wasInCV = false;
+
 void updateChargerState() {
-    unsigned long currentTime = millis(); // Get current time for non-blocking delays
+  unsigned long now = millis();
 
-    switch (chargerState) {
-        case IDLE:
-            // Charger is in IDLE state.
-            // Automatically start charging if battery voltage is significantly below the target.
-            // You could also add a button press to start charging here.
-            if (batteryVoltage < (desiredFinalVoltage - 1.0)) { // If battery is 1V below target, auto-start
-                chargerState = CHARGING;
-                Serial.println("State: IDLE -> CHARGING (Auto-start)");
-                lastChargeCheckTime = currentTime; // Reset timer for the 30-second check
-                digitalWrite(CHARGED_INDICATOR_PIN, LOW); // Ensure indicator is off when charging starts
-            }
-            setPwmDutyCycle(0); // Keep PWM off while idle
-            break;
+  switch (chargerState) {
+    case IDLE:
+      setPwmDutyCycle(0);
+      integralCC = 0; integralCV = 0; wasInCV = false;
+      if (batteryVoltageFiltered < (desiredFinalVoltage - 1.0f)) {
+        chargerState = CHARGING;
+        lastChargeCheckTime = now;
+        digitalWrite(CHARGED_INDICATOR_PIN, LOW);
+      }
+      break;
 
-        case CHARGING:
-            // Actively charging the battery.
-            // This implements a basic Constant Current (CC) / Constant Voltage (CV) logic.
-            if (chargingCurrent > desiredCurrentLimit) {
-                // If current exceeds the desired limit, reduce PWM to limit current (CC mode).
-                // Subtract a value proportional to the current overshoot.
-                setPwmDutyCycle(currentPwmDutyCycle - (int)(KP_CURRENT * (chargingCurrent - desiredCurrentLimit)));
-                Serial.print("State: CHARGING (CC) - Current too high. PWM: "); Serial.println(currentPwmDutyCycle);
-            } else if (batteryVoltage < desiredFinalVoltage) {
-                // If battery voltage is below target AND current is within limits,
-                // increase PWM to raise voltage (moving towards CV mode or continuing CC).
-                // Slowly increase PWM towards the TARGET_30V_PWM_DUTY.
-                if (currentPwmDutyCycle < TARGET_30V_PWM_DUTY) {
-                    setPwmDutyCycle(currentPwmDutyCycle + (int)(KP_CURRENT * (desiredCurrentLimit - chargingCurrent)));
-                    // A simpler increment: setPwmDutyCycle(currentPwmDutyCycle + 5);
-                }
-                Serial.print("State: CHARGING (CV/CC) - Voltage/Current low. PWM: "); Serial.println(currentPwmDutyCycle);
-            } else {
-                // Battery voltage has reached desiredFinalVoltage, and current is within limits.
-                // This is the Constant Voltage (CV) phase. Try to maintain the voltage.
-                // Subtract a value proportional to voltage overshoot to prevent overcharging.
-                setPwmDutyCycle(currentPwmDutyCycle - (int)(KP_VOLTAGE * (batteryVoltage - desiredFinalVoltage)));
-                Serial.print("State: CHARGING (CV) - Voltage reached. PWM: "); Serial.println(currentPwmDutyCycle);
-            }
+    case CHARGING: {
+      // Safety: measured current exceeds limit by too much
+      if (chargingCurrentFiltered > (desiredCurrentLimit * MAX_ALLOWED_CURRENT_MULTIPLIER + 0.5f)) {
+        Serial.println("EMERGENCY SHUTDOWN: Overcurrent");
+        setPwmDutyCycle(0);
+        chargerState = IDLE;
+        break;
+      }
 
-            // Check if 30 seconds have passed to perform a voltage check.
-            if (currentTime - lastChargeCheckTime >= CHARGE_CHECK_INTERVAL_MS) {
-                chargerState = PAUSED_CHECK_VOLTAGE;
-                Serial.println("State: CHARGING -> PAUSED_CHECK_VOLTAGE");
-                setPwmDutyCycle(0); // Turn off PWM to get an accurate, unloaded battery voltage reading
-                lastChargeCheckTime = currentTime; // Reset timer for the next 30s check if charging resumes
-            }
-            break;
+      int dutyCmd;
+      // Use a small hysteresis for CC/CV transition to avoid chattering
+      bool useCV = batteryVoltageFiltered >= (desiredFinalVoltage - 0.05f);
+      if (wasInCV) {
+          useCV = batteryVoltageFiltered >= (desiredFinalVoltage - 0.3f);
+      }
 
-        case PAUSED_CHECK_VOLTAGE:
-            // Charger is paused to check the battery voltage accurately.
-            setPwmDutyCycle(0); // Ensure PWM is off
+      if (useCV) {
+          // CV Mode
+          if (!wasInCV) {
+              // Bumpless transfer: initialize CV integral with current duty cycle
+              integralCV = (float)currentPwmDutyCycle;
+              wasInCV = true;
+          }
+          float errV = desiredFinalVoltage - batteryVoltageFiltered;
+          dutyCmd = piController(errV, integralCV, KP_CV, KI_CV);
+      } else {
+          // CC Mode / Bulk
+          if (wasInCV) {
+              // Bumpless transfer: initialize CC integral with current duty cycle
+              integralCC = (float)currentPwmDutyCycle;
+              wasInCV = false;
+          }
+          float errI = desiredCurrentLimit - chargingCurrentFiltered;
+          dutyCmd = piController(errI, integralCC, KP_CC, KI_CC);
+      }
 
-            Serial.print("State: PAUSED_CHECK_VOLTAGE - Battery Voltage: "); Serial.println(batteryVoltage);
+      setPwmDutyCycle(dutyCmd);
 
-            if (batteryVoltage >= desiredFinalVoltage) {
-                // Battery has reached or exceeded the desired final charging voltage.
-                chargerState = CHARGED_COMPLETE;
-                digitalWrite(CHARGED_INDICATOR_PIN, HIGH); // Set GPIO9 high to indicate charging complete
-                Serial.println("State: PAUSED_CHECK_VOLTAGE -> CHARGED_COMPLETE");
-            } else {
-                // Battery has not yet reached the desired final voltage. Resume charging.
-                chargerState = CHARGING;
-                Serial.println("State: PAUSED_CHECK_VOLTAGE -> CHARGING (Voltage not reached)");
-                // PWM will be turned back on by the logic in the CHARGING state.
-            }
-            break;
-
-        case CHARGED_COMPLETE:
-            // Battery is fully charged. Charger is off.
-            setPwmDutyCycle(0); // Ensure PWM is off
-            digitalWrite(CHARGED_INDICATOR_PIN, HIGH); // Keep GPIO9 high
-
-            // Resume charging if the battery voltage drops significantly (0.5V below target).
-            if (batteryVoltage <= (desiredFinalVoltage - 0.5)) {
-                chargerState = CHARGING;
-                digitalWrite(CHARGED_INDICATOR_PIN, LOW); // Turn off indicator as charging resumes
-                Serial.println("State: CHARGED_COMPLETE -> CHARGING (Voltage dropped)");
-                lastChargeCheckTime = currentTime; // Reset timer for the 30-second check
-            }
-            break;
+      if (now - lastChargeCheckTime >= CHARGE_CHECK_INTERVAL_MS) {
+        setPwmDutyCycle(0);
+        pausedStartTime = now;
+        chargerState = PAUSED_CHECK_VOLTAGE;
+      }
+      break;
     }
+
+    case PAUSED_CHECK_VOLTAGE:
+      if (now - pausedStartTime < PAUSE_SETTLE_MS) return;
+
+      // Update readings after settling
+      readSensorInputs();
+      // We check raw batteryVoltage here for accuracy since it's unloaded
+      if (batteryVoltage >= desiredFinalVoltage - 0.1f) {
+        chargerState = CHARGED_COMPLETE;
+        digitalWrite(CHARGED_INDICATOR_PIN, HIGH);
+      } else {
+        chargerState = CHARGING;
+        lastChargeCheckTime = now;
+        // Don't reset integrals here to maintain duty cycle when resuming
+      }
+      break;
+
+    case CHARGED_COMPLETE:
+      setPwmDutyCycle(0);
+      if (batteryVoltageFiltered <= (desiredFinalVoltage - 0.5f)) {
+        chargerState = CHARGING;
+        digitalWrite(CHARGED_INDICATOR_PIN, LOW);
+        lastChargeCheckTime = now;
+      }
+      break;
+  }
 }
 
-// --- Function to Update OLED Display ---
 void updateOLED() {
-    display.clearDisplay(); // Clear the display buffer
+  if (!oledAvailable) return;
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print("State: ");
+  switch (chargerState) {
+    case IDLE: display.println("IDLE"); break;
+    case CHARGING: display.println("CHARGING"); break;
+    case PAUSED_CHECK_VOLTAGE: display.println("PAUSED"); break;
+    case CHARGED_COMPLETE: display.println("CHARGED!"); break;
+  }
+  display.print("Bat V: "); display.print(batteryVoltageFiltered, 2); display.println(" V");
+  display.print("Chg I: "); display.print(chargingCurrentFiltered, 3); display.println(" A");
+  display.print("PWM: "); display.println(currentPwmDutyCycle);
+  display.display();
+}
 
-    // Display Charger State
-    display.setTextSize(1);
-    display.setCursor(0, 0);
-    display.print("State: ");
-    switch (chargerState) {
-        case IDLE: display.println("IDLE"); break;
-        case CHARGING: display.println("CHARGING"); break;
-        case PAUSED_CHECK_VOLTAGE: display.println("PAUSED"); break;
-        case CHARGED_COMPLETE: display.println("CHARGED!"); break;
-    }
-
-    // Display Battery Voltage
-    display.print("Bat V: ");
-    display.print(batteryVoltage, 2); // Display with 2 decimal places
-    display.println("V");
-
-    // Display Charging Current
-    display.print("Chg I: ");
-    display.print(chargingCurrent, 2);
-    display.println("A");
-
-    // Display Desired Final Voltage Setting
-    display.print("Set V: ");
-    display.print(desiredFinalVoltage, 2);
-    display.println("V");
-
-    // Display Desired Current Limit Setting
-    display.print("Set I: ");
-    display.print(desiredCurrentLimit, 2);
-    display.println("A");
-
-    // Display Current PWM Duty Cycle
-    display.print("PWM: ");
-    display.println(currentPwmDutyCycle);
-
-    display.display(); // Push the buffer content to the actual display
+void enableOledOrWarn() {
+  if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+    oledAvailable = false;
+  } else {
+    oledAvailable = true;
+    display.clearDisplay();
+    display.setTextColor(SSD1306_WHITE);
+    display.println("Ready");
+    display.display();
+  }
 }
