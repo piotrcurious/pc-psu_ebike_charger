@@ -16,7 +16,8 @@ const int CURRENT_SENSE_AMP_PIN = 1;
 const int DESIRED_VOLTAGE_SET_PIN = 2;
 const int DESIRED_CURRENT_SET_PIN = 3;
 const int ATX_PS_ON_PIN = 9;
-const int UI_BUTTON_PIN = 4; // Use GPIO 4 for UI interaction
+const int UI_BUTTON_PIN = 4;
+const int TEMP_SENSE_PIN = 5; // Use GPIO 5 for NTC thermistor
 
 // --- Signal Polarity ---
 #define ATX_PSU_ON  LOW
@@ -41,6 +42,12 @@ const float ADC_V_PER_COUNT = (ADC_MAX_VOLTAGE / ADC_MAX_READING);
 const float VOLTAGE_SENSE_FACTOR = ADC_V_PER_COUNT * VOLTAGE_DIVIDER_RATIO;
 const float CURRENT_RAW_TO_A = ADC_V_PER_COUNT / ACS712_SENSITIVITY;
 
+// NTC Thermistor Parameters (Example for 10k NTC)
+const float NTC_R_SERIES = 10000.0f;
+const float NTC_NOMINAL_R = 10000.0f;
+const float NTC_NOMINAL_T = 25.0f;
+const float NTC_BETA = 3950.0f;
+
 // --- Timing ---
 const unsigned long CHARGE_CHECK_INTERVAL_MS = 30000UL;
 const unsigned long PAUSE_SETTLE_MS = 1000UL;
@@ -55,15 +62,17 @@ const float VOLTAGE_DEADBAND = 0.05f;
 const float CURRENT_DEADBAND = 0.05f;
 const float MIN_BATTERY_VOLTAGE = 15.0f;
 const float MAX_ALLOWED_CURRENT_MULTIPLIER = 2.0f;
+const float MAX_ALLOWED_TEMP = 60.0f; // Celsius
 const float SOFT_START_RAMP_A_PER_S = 0.1f;
 const float FULL_CHARGE_CURRENT_THRESHOLD = 0.1f;
 
 // Filters
 const float FILTER_ALPHA_V = 0.2f;
 const float FILTER_ALPHA_I = 0.2f;
+const float FILTER_ALPHA_T = 0.1f;
 
 // --- Logging and UI ---
 #define GRAPH_BUFFER_SIZE 64
-const unsigned long GRAPH_UPDATE_INTERVAL_MS = 60000UL; // Log point every minute
+const unsigned long GRAPH_UPDATE_INTERVAL_MS = 60000UL;
 
 #endif
