@@ -1,5 +1,5 @@
 /*
-  ESP32-C3 Charger - Improved with PI controller and anti-windup.
+  ESP32-C3 Charger - Robust Step-Based Version.
 */
 
 #include <Arduino.h>
@@ -7,7 +7,6 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-// --- OLED Display Configuration ---
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET -1
@@ -15,27 +14,23 @@
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 bool oledAvailable = false;
 
-// --- Pin Definitions (GPIO numbers) ---
-const int PWM_OUT_PIN = 10;               // LEDC PWM output to MOSFET gate
-const int BAT_VOLTAGE_SENSE_PIN = 0;      // ADC input for battery voltage (GPIO number)
-const int CURRENT_SENSE_AMP_PIN = 1;      // ADC input for ACS712 output (GPIO number)
-const int DESIRED_VOLTAGE_SET_PIN = 2;    // ADC input for setpoint pot (voltage)
-const int DESIRED_CURRENT_SET_PIN = 3;    // ADC input for setpoint pot (current)
-const int CHARGED_INDICATOR_PIN = 9;      // Digital output indicator (LED)
+const int PWM_OUT_PIN = 10;
+const int BAT_VOLTAGE_SENSE_PIN = 0;
+const int CURRENT_SENSE_AMP_PIN = 1;
+const int DESIRED_VOLTAGE_SET_PIN = 2;
+const int DESIRED_CURRENT_SET_PIN = 3;
+const int CHARGED_INDICATOR_PIN = 9;
 
-// --- PWM (LEDC) settings ---
 const int PWM_CHANNEL = 0;
-const int PWM_FREQ = 50000;    // 50 kHz
-const int PWM_RESOLUTION = 10; // bits (0..1023)
+const int PWM_FREQ = 50000;
+const int PWM_RESOLUTION = 10;
 const int MAX_PWM_DUTY = (1 << PWM_RESOLUTION) - 1;
 
-// --- ADC / Sampling ---
-const float ADC_MAX_VOLTAGE = 3.3f;  // Vref
-const float ADC_MAX_READING = 4095.0f; // 12-bit
+const float ADC_MAX_VOLTAGE = 3.3f;
+const float ADC_MAX_READING = 4095.0f;
 const int ADC_SAMPLES = 16;
 const int CALIBRATION_SAMPLES = 100;
 
-// --- Calibration ---
 const float VOLTAGE_DIVIDER_RATIO = 9.33f;
 const float ACS712_SENSITIVITY = 0.185f;
 
@@ -43,11 +38,9 @@ const float ADC_V_PER_COUNT = (ADC_MAX_VOLTAGE / ADC_MAX_READING);
 const float VOLTAGE_SENSE_FACTOR = ADC_V_PER_COUNT * VOLTAGE_DIVIDER_RATIO;
 const float CURRENT_RAW_TO_A = ADC_V_PER_COUNT / ACS712_SENSITIVITY;
 
-// --- Charger State Machine ---
 enum ChargerState_t { IDLE, CHARGING, PAUSED_CHECK_VOLTAGE, CHARGED_COMPLETE };
 ChargerState_t chargerState = IDLE;
 
-// --- Global Variables ---
 float batteryVoltage = 0.0f;
 float batteryVoltageFiltered = 0.0f;
 float chargingCurrent = 0.0f;
@@ -58,29 +51,23 @@ int currentPwmDutyCycle = 0;
 
 int currentSensorOffsetRaw = 2048;
 
-// --- Timing ---
 unsigned long lastChargeCheckTime = 0;
 const unsigned long CHARGE_CHECK_INTERVAL_MS = 30000UL;
 unsigned long pausedStartTime = 0;
 const unsigned long PAUSE_SETTLE_MS = 1000UL;
 
-// --- PI Controller parameters ---
-float KP_CC = 15.0f;
-float KI_CC = 4.0f;
-float KP_CV = 8.0f;
-float KI_CV = 1.5f;
+const int PWM_STEP_UP = 5;
+const int PWM_STEP_DOWN_FAST = 5;
+const int PWM_STEP_DOWN_SLOW = 1;
 
-float integralCC = 0.0f;
-float integralCV = 0.0f;
+const float VOLTAGE_DEADBAND = 0.05f;
+const float CURRENT_DEADBAND = 0.05f;
 
-// Safety
 const float MAX_ALLOWED_CURRENT_MULTIPLIER = 2.0f;
 
-// Filters
 const float FILTER_ALPHA_V = 0.2f;
 const float FILTER_ALPHA_I = 0.2f;
 
-// Function prototypes
 void readSensorInputs();
 void updateChargerState();
 void updateOLED();
@@ -88,25 +75,11 @@ void setPwmDutyCycle(int dutyCycle);
 int analogReadAveraged(int pin);
 void calibrateCurrentSensor(bool verbose = true);
 void enableOledOrWarn();
-int piController(float error, float &integral, float kp, float ki);
 
-// ---------------------- PI Controller ----------------------
-int piController(float error, float &integral, float kp, float ki) {
-    integral += ki * error;
-
-    // Anti-windup: clamp integral to PWM range
-    if (integral > MAX_PWM_DUTY) integral = (float)MAX_PWM_DUTY;
-    else if (integral < 0) integral = 0;
-
-    float u = kp * error + integral;
-    return constrain((int)u, 0, MAX_PWM_DUTY);
-}
-
-// ---------------------- Setup ----------------------
 void setup() {
   Serial.begin(115200);
   delay(10);
-  Serial.println("\n=== ESP32 Charger Improved ===");
+  Serial.println("\n=== ESP32 Charger Robust Version ===");
 
   pinMode(CHARGED_INDICATOR_PIN, OUTPUT);
   digitalWrite(CHARGED_INDICATOR_PIN, LOW);
@@ -144,7 +117,7 @@ void loop() {
     char c = (char)Serial.read();
     if (c == 'c' || c == 'C') calibrateCurrentSensor(true);
   }
-  delay(50);
+  delay(20);
 }
 
 int analogReadAveraged(int pin) {
@@ -176,11 +149,11 @@ void readSensorInputs() {
   int rawSetV = analogReadAveraged(DESIRED_VOLTAGE_SET_PIN);
   int rawSetI = analogReadAveraged(DESIRED_CURRENT_SET_PIN);
 
-  batteryVoltage = rawBat * VOLTAGE_SENSE_FACTOR;
-  chargingCurrent = (rawI - currentSensorOffsetRaw) * CURRENT_RAW_TO_A;
+  batteryVoltage = (float)rawBat * VOLTAGE_SENSE_FACTOR;
+  chargingCurrent = (float)(rawI - currentSensorOffsetRaw) * CURRENT_RAW_TO_A;
 
-  desiredFinalVoltage = rawSetV * ADC_V_PER_COUNT * (30.0f / 3.3f);
-  desiredCurrentLimit = rawSetI * ADC_V_PER_COUNT * (5.0f / 3.3f);
+  desiredFinalVoltage = (float)rawSetV * ADC_V_PER_COUNT * (30.0f / 3.3f);
+  desiredCurrentLimit = (float)rawSetI * ADC_V_PER_COUNT * (5.0f / 3.3f);
 
   desiredFinalVoltage = constrain(desiredFinalVoltage, 26.0f, 30.0f);
   desiredCurrentLimit = constrain(desiredCurrentLimit, 0.1f, 5.0f);
@@ -194,24 +167,24 @@ void setPwmDutyCycle(int dutyCycle) {
   ledcWrite(PWM_CHANNEL, currentPwmDutyCycle);
 }
 
-bool wasInCV = false;
-
 void updateChargerState() {
+  static unsigned long lastUpdate = 0;
   unsigned long now = millis();
+  if (chargerState != PAUSED_CHECK_VOLTAGE && now - lastUpdate < 50) return;
+  lastUpdate = now;
 
   switch (chargerState) {
     case IDLE:
       setPwmDutyCycle(0);
-      integralCC = 0; integralCV = 0; wasInCV = false;
       if (batteryVoltageFiltered < (desiredFinalVoltage - 1.0f)) {
         chargerState = CHARGING;
         lastChargeCheckTime = now;
         digitalWrite(CHARGED_INDICATOR_PIN, LOW);
+        Serial.println("Starting charge...");
       }
       break;
 
     case CHARGING: {
-      // Safety: measured current exceeds limit by too much
       if (chargingCurrentFiltered > (desiredCurrentLimit * MAX_ALLOWED_CURRENT_MULTIPLIER + 0.5f)) {
         Serial.println("EMERGENCY SHUTDOWN: Overcurrent");
         setPwmDutyCycle(0);
@@ -219,36 +192,23 @@ void updateChargerState() {
         break;
       }
 
-      int dutyCmd;
-      // Use a small hysteresis for CC/CV transition to avoid chattering
-      bool useCV = batteryVoltageFiltered >= (desiredFinalVoltage - 0.05f);
-      if (wasInCV) {
-          useCV = batteryVoltageFiltered >= (desiredFinalVoltage - 0.3f);
+      int nextPwm = currentPwmDutyCycle;
+
+      if (chargingCurrentFiltered > (desiredCurrentLimit + CURRENT_DEADBAND)) {
+          nextPwm -= PWM_STEP_DOWN_FAST;
+      }
+      else if (batteryVoltageFiltered > (desiredFinalVoltage + VOLTAGE_DEADBAND)) {
+          nextPwm -= PWM_STEP_DOWN_SLOW;
+      }
+      else if (chargingCurrentFiltered < (desiredCurrentLimit - CURRENT_DEADBAND) &&
+               batteryVoltageFiltered < (desiredFinalVoltage - VOLTAGE_DEADBAND)) {
+          nextPwm += PWM_STEP_UP;
       }
 
-      if (useCV) {
-          // CV Mode
-          if (!wasInCV) {
-              // Bumpless transfer: initialize CV integral with current duty cycle
-              integralCV = (float)currentPwmDutyCycle;
-              wasInCV = true;
-          }
-          float errV = desiredFinalVoltage - batteryVoltageFiltered;
-          dutyCmd = piController(errV, integralCV, KP_CV, KI_CV);
-      } else {
-          // CC Mode / Bulk
-          if (wasInCV) {
-              // Bumpless transfer: initialize CC integral with current duty cycle
-              integralCC = (float)currentPwmDutyCycle;
-              wasInCV = false;
-          }
-          float errI = desiredCurrentLimit - chargingCurrentFiltered;
-          dutyCmd = piController(errI, integralCC, KP_CC, KI_CC);
-      }
-
-      setPwmDutyCycle(dutyCmd);
+      setPwmDutyCycle(nextPwm);
 
       if (now - lastChargeCheckTime >= CHARGE_CHECK_INTERVAL_MS) {
+        Serial.println("30s passed - pausing to check unloaded voltage");
         setPwmDutyCycle(0);
         pausedStartTime = now;
         chargerState = PAUSED_CHECK_VOLTAGE;
@@ -257,18 +217,18 @@ void updateChargerState() {
     }
 
     case PAUSED_CHECK_VOLTAGE:
+      setPwmDutyCycle(0);
       if (now - pausedStartTime < PAUSE_SETTLE_MS) return;
 
-      // Update readings after settling
       readSensorInputs();
-      // We check raw batteryVoltage here for accuracy since it's unloaded
       if (batteryVoltage >= desiredFinalVoltage - 0.1f) {
+        Serial.println("Final voltage reached - CHARGED_COMPLETE");
         chargerState = CHARGED_COMPLETE;
         digitalWrite(CHARGED_INDICATOR_PIN, HIGH);
       } else {
+        Serial.println("Voltage not reached - resuming charging");
         chargerState = CHARGING;
         lastChargeCheckTime = now;
-        // Don't reset integrals here to maintain duty cycle when resuming
       }
       break;
 
@@ -278,6 +238,7 @@ void updateChargerState() {
         chargerState = CHARGING;
         digitalWrite(CHARGED_INDICATOR_PIN, LOW);
         lastChargeCheckTime = now;
+        Serial.println("Voltage dropped - resuming charging");
       }
       break;
   }
