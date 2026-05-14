@@ -8,10 +8,11 @@ void advance_millis(unsigned long ms) { _millis += ms; }
 static int _analogValues[16] = {0};
 int analogRead(uint8_t pin) { return (pin < 16) ? _analogValues[pin] : 0; }
 void setAnalogRead(uint8_t pin, int value) { if (pin < 16) _analogValues[pin] = value; }
-static uint8_t _digitalValues[16] = {0};
+static uint8_t _digitalValues[16] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 void pinMode(uint8_t pin, uint8_t mode) {}
 void digitalWrite(uint8_t pin, uint8_t val) { if (pin < 16) _digitalValues[pin] = val; }
 int digitalRead(uint8_t pin) { return (pin < 16) ? _digitalValues[pin] : 0; }
+void setDigitalRead(uint8_t pin, uint8_t val) { if (pin < 16) _digitalValues[pin] = val; }
 void analogReadResolution(int res) {}
 void analogSetPinAttenuation(int pin, int atten) {}
 static uint32_t _pwmValues[16] = {0};

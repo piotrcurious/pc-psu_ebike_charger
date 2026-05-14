@@ -16,10 +16,9 @@ const int CURRENT_SENSE_AMP_PIN = 1;
 const int DESIRED_VOLTAGE_SET_PIN = 2;
 const int DESIRED_CURRENT_SET_PIN = 3;
 const int ATX_PS_ON_PIN = 9;
+const int UI_BUTTON_PIN = 4; // Use GPIO 4 for UI interaction
 
 // --- Signal Polarity ---
-// ATX PS_ON is active-low (connect to GND to turn ON, leave open/HIGH to turn OFF).
-// If using a transistor/buffer, you might need to adjust these.
 #define ATX_PSU_ON  LOW
 #define ATX_PSU_OFF HIGH
 
@@ -30,15 +29,14 @@ const int PWM_RESOLUTION = 10;
 const int MAX_PWM_DUTY = (1 << PWM_RESOLUTION) - 1;
 
 // --- ADC / Sampling ---
-const float ADC_MAX_VOLTAGE = 3.3f;
-const float ADC_MAX_READING = 4095.0f;
 const int ADC_SAMPLES = 16;
 const int CALIBRATION_SAMPLES = 100;
 
 // --- Calibration ---
 const float VOLTAGE_DIVIDER_RATIO = 9.33f;
 const float ACS712_SENSITIVITY = 0.185f;
-
+const float ADC_MAX_VOLTAGE = 3.3f;
+const float ADC_MAX_READING = 4095.0f;
 const float ADC_V_PER_COUNT = (ADC_MAX_VOLTAGE / ADC_MAX_READING);
 const float VOLTAGE_SENSE_FACTOR = ADC_V_PER_COUNT * VOLTAGE_DIVIDER_RATIO;
 const float CURRENT_RAW_TO_A = ADC_V_PER_COUNT / ACS712_SENSITIVITY;
@@ -53,21 +51,19 @@ const unsigned long MAX_CHARGE_TIME_MS = 12 * 3600 * 1000UL;
 const int PWM_STEP_UP = 2;
 const int PWM_STEP_DOWN_FAST = 5;
 const int PWM_STEP_DOWN_SLOW = 1;
-
 const float VOLTAGE_DEADBAND = 0.05f;
 const float CURRENT_DEADBAND = 0.05f;
-
 const float MIN_BATTERY_VOLTAGE = 15.0f;
 const float MAX_ALLOWED_CURRENT_MULTIPLIER = 2.0f;
-
-// Soft-start
 const float SOFT_START_RAMP_A_PER_S = 0.1f;
-
-// Charge Termination in CV mode
 const float FULL_CHARGE_CURRENT_THRESHOLD = 0.1f;
 
 // Filters
 const float FILTER_ALPHA_V = 0.2f;
 const float FILTER_ALPHA_I = 0.2f;
+
+// --- Logging and UI ---
+#define GRAPH_BUFFER_SIZE 64
+const unsigned long GRAPH_UPDATE_INTERVAL_MS = 60000UL; // Log point every minute
 
 #endif
