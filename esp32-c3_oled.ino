@@ -1,5 +1,5 @@
 /*
-  ESP32-C3 Charger - Robust Step-Based Version.
+  ESP32-C3 Charger - Robust Step-Based Version with ATX PSU Control.
 */
 
 #include <Arduino.h>
@@ -19,7 +19,7 @@ const int BAT_VOLTAGE_SENSE_PIN = 0;
 const int CURRENT_SENSE_AMP_PIN = 1;
 const int DESIRED_VOLTAGE_SET_PIN = 2;
 const int DESIRED_CURRENT_SET_PIN = 3;
-const int CHARGED_INDICATOR_PIN = 9;
+const int ATX_PS_ON_PIN = 9;
 
 const int PWM_CHANNEL = 0;
 const int PWM_FREQ = 50000;
@@ -56,7 +56,10 @@ const unsigned long CHARGE_CHECK_INTERVAL_MS = 30000UL;
 unsigned long pausedStartTime = 0;
 const unsigned long PAUSE_SETTLE_MS = 1000UL;
 
-const int PWM_STEP_UP = 5;
+unsigned long lastPsuOffTime = 0;
+const unsigned long PSU_RESTART_COOLDOWN_MS = 10000UL;
+
+const int PWM_STEP_UP = 2;
 const int PWM_STEP_DOWN_FAST = 5;
 const int PWM_STEP_DOWN_SLOW = 1;
 
@@ -75,14 +78,15 @@ void setPwmDutyCycle(int dutyCycle);
 int analogReadAveraged(int pin);
 void calibrateCurrentSensor(bool verbose = true);
 void enableOledOrWarn();
+void setPsuState(bool on);
 
 void setup() {
   Serial.begin(115200);
   delay(10);
   Serial.println("\n=== ESP32 Charger Robust Version ===");
 
-  pinMode(CHARGED_INDICATOR_PIN, OUTPUT);
-  digitalWrite(CHARGED_INDICATOR_PIN, LOW);
+  pinMode(ATX_PS_ON_PIN, OUTPUT);
+  setPsuState(false);
 
   ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RESOLUTION);
   ledcAttachPin(PWM_OUT_PIN, PWM_CHANNEL);
@@ -167,6 +171,25 @@ void setPwmDutyCycle(int dutyCycle) {
   ledcWrite(PWM_CHANNEL, currentPwmDutyCycle);
 }
 
+void setPsuState(bool on) {
+    bool currentState = (digitalRead(ATX_PS_ON_PIN) == HIGH);
+    if (on) {
+        if (!currentState) {
+            unsigned long now = millis();
+            if (now - lastPsuOffTime >= PSU_RESTART_COOLDOWN_MS) {
+                digitalWrite(ATX_PS_ON_PIN, HIGH);
+                Serial.println("PSU turned ON");
+            }
+        }
+    } else {
+        if (currentState) {
+            digitalWrite(ATX_PS_ON_PIN, LOW);
+            lastPsuOffTime = millis();
+            Serial.println("PSU turned OFF");
+        }
+    }
+}
+
 void updateChargerState() {
   static unsigned long lastUpdate = 0;
   unsigned long now = millis();
@@ -176,24 +199,30 @@ void updateChargerState() {
   switch (chargerState) {
     case IDLE:
       setPwmDutyCycle(0);
+      setPsuState(false);
       if (batteryVoltageFiltered < (desiredFinalVoltage - 1.0f)) {
-        chargerState = CHARGING;
-        lastChargeCheckTime = now;
-        digitalWrite(CHARGED_INDICATOR_PIN, LOW);
-        Serial.println("Starting charge...");
+        setPsuState(true);
+        if (digitalRead(ATX_PS_ON_PIN) == HIGH) {
+            chargerState = CHARGING;
+            lastChargeCheckTime = now;
+            Serial.println("State: IDLE -> CHARGING");
+        }
       }
       break;
 
     case CHARGING: {
+      setPsuState(true);
+      if (digitalRead(ATX_PS_ON_PIN) == LOW) break; // Waiting for cooldown
+
       if (chargingCurrentFiltered > (desiredCurrentLimit * MAX_ALLOWED_CURRENT_MULTIPLIER + 0.5f)) {
         Serial.println("EMERGENCY SHUTDOWN: Overcurrent");
         setPwmDutyCycle(0);
+        setPsuState(false);
         chargerState = IDLE;
         break;
       }
 
       int nextPwm = currentPwmDutyCycle;
-
       if (chargingCurrentFiltered > (desiredCurrentLimit + CURRENT_DEADBAND)) {
           nextPwm -= PWM_STEP_DOWN_FAST;
       }
@@ -204,11 +233,10 @@ void updateChargerState() {
                batteryVoltageFiltered < (desiredFinalVoltage - VOLTAGE_DEADBAND)) {
           nextPwm += PWM_STEP_UP;
       }
-
       setPwmDutyCycle(nextPwm);
 
       if (now - lastChargeCheckTime >= CHARGE_CHECK_INTERVAL_MS) {
-        Serial.println("30s passed - pausing to check unloaded voltage");
+        Serial.println("Periodic check - pausing PWM");
         setPwmDutyCycle(0);
         pausedStartTime = now;
         chargerState = PAUSED_CHECK_VOLTAGE;
@@ -219,14 +247,13 @@ void updateChargerState() {
     case PAUSED_CHECK_VOLTAGE:
       setPwmDutyCycle(0);
       if (now - pausedStartTime < PAUSE_SETTLE_MS) return;
-
       readSensorInputs();
       if (batteryVoltage >= desiredFinalVoltage - 0.1f) {
-        Serial.println("Final voltage reached - CHARGED_COMPLETE");
+        Serial.println("Final voltage reached - State: CHARGED_COMPLETE");
+        setPsuState(false);
         chargerState = CHARGED_COMPLETE;
-        digitalWrite(CHARGED_INDICATOR_PIN, HIGH);
       } else {
-        Serial.println("Voltage not reached - resuming charging");
+        Serial.println("Voltage not reached - State: CHARGING");
         chargerState = CHARGING;
         lastChargeCheckTime = now;
       }
@@ -234,11 +261,14 @@ void updateChargerState() {
 
     case CHARGED_COMPLETE:
       setPwmDutyCycle(0);
+      setPsuState(false);
       if (batteryVoltageFiltered <= (desiredFinalVoltage - 0.5f)) {
-        chargerState = CHARGING;
-        digitalWrite(CHARGED_INDICATOR_PIN, LOW);
-        lastChargeCheckTime = now;
-        Serial.println("Voltage dropped - resuming charging");
+        setPsuState(true);
+        if (digitalRead(ATX_PS_ON_PIN) == HIGH) {
+            chargerState = CHARGING;
+            lastChargeCheckTime = now;
+            Serial.println("Voltage dropped - State: CHARGING");
+        }
       }
       break;
   }
@@ -259,6 +289,7 @@ void updateOLED() {
   display.print("Bat V: "); display.print(batteryVoltageFiltered, 2); display.println(" V");
   display.print("Chg I: "); display.print(chargingCurrentFiltered, 3); display.println(" A");
   display.print("PWM: "); display.println(currentPwmDutyCycle);
+  display.print("PSU: "); display.println(digitalRead(ATX_PS_ON_PIN) == HIGH ? "ON" : "OFF");
   display.display();
 }
 
