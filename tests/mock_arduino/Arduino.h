@@ -42,13 +42,13 @@ public:
     void print(double f, int p = 2) { printf("%.*f", p, f); }
     void print(int i) { printf("%d", i); }
     void print(unsigned int i) { printf("%u", i); }
-    void print(unsigned long i) { printf("%lu", (unsigned long)i); }
+    void print(unsigned long i) { printf("%lu", i); }
     void println(const char* s) { printf("%s\n", s); }
     void println(float f, int p = 2) { printf("%.*f\n", p, f); }
     void println(double f, int p = 2) { printf("%.*f\n", p, f); }
     void println(int i) { printf("%d\n", i); }
     void println(unsigned int i) { printf("%u\n", i); }
-    void println(unsigned long i) { printf("%lu\n", (unsigned long)i); }
+    void println(unsigned long i) { printf("%lu\n", i); }
     void println() { printf("\n"); }
     int available() { return 0; }
     int read() { return -1; }
