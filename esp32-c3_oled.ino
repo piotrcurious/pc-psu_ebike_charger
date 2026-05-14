@@ -1,5 +1,6 @@
 /*
   ESP32-C3 Charger - Robust Step-Based Version with ATX PSU Control.
+  Multi-screen UI and charge logging.
 */
 
 #include "config.h"
@@ -40,6 +41,17 @@ unsigned long lastDiagTime = 0;
 
 float targetCurrentLimit = 0.05f;
 
+// Logging variables
+float integratedAh = 0.0f;
+float integratedWh = 0.0f;
+float voltageHistory[GRAPH_BUFFER_SIZE];
+int historyIndex = 0;
+unsigned long lastGraphUpdateTime = 0;
+
+// UI variables
+int currentScreen = 0; // 0: Settings/Status, 1: Live, 2: Graph, 3: Summary
+bool lastButtonState = HIGH;
+
 // --- Function Prototypes ---
 void readSensorInputs();
 void updateChargerState();
@@ -52,6 +64,8 @@ void setPsuState(bool on);
 void handleChargingState(unsigned long now, float dt);
 void handleError(ErrorType_t type, const char* msg);
 void outputDiagnostics(unsigned long now);
+void updateLogging(float dt);
+void handleUI();
 
 // ---------------------- Setup ----------------------
 void setup() {
@@ -61,6 +75,8 @@ void setup() {
 
   pinMode(ATX_PS_ON_PIN, OUTPUT);
   setPsuState(false);
+
+  pinMode(UI_BUTTON_PIN, INPUT_PULLUP);
 
   ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RESOLUTION);
   ledcAttachPin(PWM_OUT_PIN, PWM_CHANNEL);
@@ -81,13 +97,21 @@ void setup() {
 
   readSensorInputs();
   lastChargeCheckTime = millis();
+
+  for(int i=0; i<GRAPH_BUFFER_SIZE; i++) voltageHistory[i] = 0.0f;
 }
 
 // ---------------------- Loop ----------------------
 void loop() {
   unsigned long now = millis();
+  static unsigned long lastLoopTime = 0;
+  float dt = (float)(now - lastLoopTime) / 1000.0f;
+  lastLoopTime = now;
+
   readSensorInputs();
   updateChargerState();
+  updateLogging(dt);
+  handleUI();
   updateOLED();
   outputDiagnostics(now);
 
@@ -99,6 +123,7 @@ void loop() {
         lastError = NO_ERROR;
         vBatFilter.reset();
         iChgFilter.reset();
+        integratedAh = 0; integratedWh = 0;
         Serial.println("System Reset");
     }
   }
@@ -173,16 +198,45 @@ void setPsuState(bool on) {
     }
 }
 
-// ---------------------- Diagnostics ----------------------
+// ---------------------- Diagnostics & Logging ----------------------
 void outputDiagnostics(unsigned long now) {
-    if (now - lastDiagTime >= 5000) { // Every 5 seconds
+    if (now - lastDiagTime >= 5000) {
         lastDiagTime = now;
         Serial.print("DIAG: State="); Serial.print((int)chargerState);
         Serial.print(" Vbat="); Serial.print(vBatFilter.value(), 2);
         Serial.print(" Ichg="); Serial.print(iChgFilter.value(), 3);
         Serial.print(" PWM="); Serial.print(currentPwmDutyCycle);
+        Serial.print(" Ah="); Serial.print(integratedAh, 4);
         Serial.print(" PSU="); Serial.println(digitalRead(ATX_PS_ON_PIN) == ATX_PSU_ON ? "ON" : "OFF");
     }
+}
+
+void updateLogging(float dt) {
+    unsigned long now = millis();
+    if (chargerState == CHARGING) {
+        float iFiltered = iChgFilter.value();
+        float bvFiltered = vBatFilter.value();
+        if (iFiltered > 0) {
+            integratedAh += (iFiltered * dt) / 3600.0f;
+            integratedWh += (iFiltered * bvFiltered * dt) / 3600.0f;
+        }
+    }
+
+    if (now - lastGraphUpdateTime >= GRAPH_UPDATE_INTERVAL_MS) {
+        lastGraphUpdateTime = now;
+        voltageHistory[historyIndex] = vBatFilter.value();
+        historyIndex = (historyIndex + 1) % GRAPH_BUFFER_SIZE;
+    }
+}
+
+void handleUI() {
+    bool btnState = digitalRead(UI_BUTTON_PIN);
+    if (btnState == LOW && lastButtonState == HIGH) {
+        currentScreen = (currentScreen + 1) % 4;
+        Serial.print("Screen changed to "); Serial.println(currentScreen);
+        delay(50); // Simple debounce
+    }
+    lastButtonState = btnState;
 }
 
 // ---------------------- Charger Logic ----------------------
@@ -214,6 +268,7 @@ void updateChargerState() {
             chargerState = CHARGING;
             lastChargeCheckTime = now;
             chargeStartTime = now;
+            integratedAh = 0; integratedWh = 0;
             Serial.println("State: IDLE -> CHARGING");
         }
       }
@@ -302,8 +357,8 @@ void handleChargingState(unsigned long now, float dt) {
     }
     setPwmDutyCycle(nextPwm);
 
-    static unsigned long fullConditionStart = 0;
     if (bvFiltered >= (desiredFinalVoltage - 0.1f) && iFiltered < FULL_CHARGE_CURRENT_THRESHOLD) {
+        static unsigned long fullConditionStart = 0;
         if (fullConditionStart == 0) fullConditionStart = now;
         if (now - fullConditionStart > 10000) {
             Serial.println("Battery full - State: CHARGED_COMPLETE");
@@ -313,8 +368,6 @@ void handleChargingState(unsigned long now, float dt) {
             fullConditionStart = 0;
             return;
         }
-    } else {
-        fullConditionStart = 0;
     }
 
     if (now - lastChargeCheckTime >= CHARGE_CHECK_INTERVAL_MS) {
@@ -331,7 +384,11 @@ void updateOLED() {
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
 
-  // Header
+  unsigned long now = millis();
+  float bvFiltered = vBatFilter.value();
+  float iFiltered = iChgFilter.value();
+
+  // Common Header: State and Time
   display.setTextSize(1);
   display.setCursor(0, 0);
   switch (chargerState) {
@@ -342,29 +399,19 @@ void updateOLED() {
     case ERROR_STATE: display.print("ERROR!"); break;
   }
 
-  unsigned long now = millis();
-  float bvFiltered = vBatFilter.value();
-  float iFiltered = iChgFilter.value();
-
-  // Elapsed Time
-  if (chargerState == CHARGING || chargerState == PAUSED_CHECK_VOLTAGE || chargerState == CHARGED_COMPLETE || chargerState == ERROR_STATE) {
-      unsigned long elapsed;
-      if (chargerState == CHARGING || chargerState == PAUSED_CHECK_VOLTAGE) elapsed = now - chargeStartTime;
-      else elapsed = chargeEndTime - chargeStartTime;
-
+  if (chargerState != IDLE) {
+      unsigned long elapsed = (chargerState == CHARGED_COMPLETE || chargerState == ERROR_STATE) ? (chargeEndTime - chargeStartTime) : (now - chargeStartTime);
       int hours = elapsed / 3600000;
       int mins = (elapsed % 3600000) / 60000;
       display.setCursor(70, 0);
       if (hours < 10) display.print("0");
-      display.print(hours);
-      display.print(":");
+      display.print(hours); display.print(":");
       if (mins < 10) display.print("0");
       display.print(mins);
   }
 
   if (chargerState == ERROR_STATE) {
       display.setCursor(0, 16);
-      display.setTextSize(1);
       switch(lastError) {
           case OVERCURRENT: display.println("OVERCURRENT"); break;
           case TIMEOUT: display.println("TIMEOUT"); break;
@@ -372,49 +419,84 @@ void updateOLED() {
           default: display.println("UNKNOWN ERROR"); break;
       }
       display.println("\nReset required.");
-  } else if (chargerState == CHARGED_COMPLETE) {
-      display.setCursor(0, 16);
-      display.setTextSize(1);
-      display.println("Charging Summary:");
-      display.print("Final V: "); display.print(bvFiltered, 2); display.println("V");
-      unsigned long totalSecs = (chargeEndTime - chargeStartTime) / 1000;
-      display.print("Time: "); display.print(totalSecs / 60); display.println(" mins");
   } else {
-      // Normal display
-      display.setTextSize(2);
-      display.setCursor(0, 12);
-      display.print(bvFiltered, 1); display.print("V");
-
-      display.setTextSize(1);
-      display.setCursor(70, 12);
-      display.print(iFiltered, 2); display.print("A");
-      display.setCursor(70, 20);
-      display.print("Lim:"); display.print(desiredCurrentLimit, 1);
-
-      display.setCursor(0, 32);
-      if (digitalRead(ATX_PS_ON_PIN) == ATX_PSU_ON) {
-          display.print("PSU: ON");
-      } else {
-          if (now - lastPsuOffTime < PSU_RESTART_COOLDOWN_MS) {
-              display.print("PSU: COOL "); display.print((PSU_RESTART_COOLDOWN_MS - (now - lastPsuOffTime)) / 1000);
+      switch (currentScreen) {
+        case 0: // Status & Settings
+          display.setTextSize(2);
+          display.setCursor(0, 12);
+          display.print(bvFiltered, 1); display.print("V");
+          display.setTextSize(1);
+          display.setCursor(70, 12);
+          display.print(iFiltered, 2); display.print("A");
+          display.setCursor(70, 20);
+          display.print("Lim:"); display.print(desiredCurrentLimit, 1);
+          display.setCursor(0, 32);
+          if (digitalRead(ATX_PS_ON_PIN) == ATX_PSU_ON) {
+              display.print("PSU: ON");
           } else {
-              display.print("PSU: OFF");
+              if (now - lastPsuOffTime < PSU_RESTART_COOLDOWN_MS) {
+                  display.print("PSU: COOL "); display.print((PSU_RESTART_COOLDOWN_MS - (now - lastPsuOffTime)) / 1000);
+              } else {
+                  display.print("PSU: OFF");
+              }
           }
+          // Progress Bar
+          {
+            float minV = desiredFinalVoltage - 5.0f;
+            if (minV < 15.0f) minV = 15.0f;
+            int progress = (int)((bvFiltered - minV) / (desiredFinalVoltage - minV) * 100.0f);
+            progress = constrain(progress, 0, 100);
+            display.drawRect(0, 44, 102, 10, SSD1306_WHITE);
+            display.fillRect(2, 46, (int)(progress * 0.98f), 6, SSD1306_WHITE);
+            display.setCursor(105, 46);
+            display.print(progress); display.print("%");
+          }
+          display.setCursor(0, 56);
+          display.print("PWM: "); display.print(currentPwmDutyCycle);
+          display.print("/"); display.print(MAX_PWM_DUTY);
+          break;
+
+        case 1: // Live View
+          display.setTextSize(2);
+          display.setCursor(0, 15);
+          display.print(bvFiltered, 2); display.println(" V");
+          display.setCursor(0, 35);
+          display.print(iFiltered, 3); display.println(" A");
+          display.setTextSize(1);
+          display.setCursor(0, 55);
+          display.print("P:"); display.print(bvFiltered * iFiltered, 1); display.print("W");
+          display.setCursor(70, 55);
+          display.print("D:"); display.print((float)currentPwmDutyCycle/MAX_PWM_DUTY*100.0f, 1); display.print("%");
+          break;
+
+        case 2: // Log Graph
+          display.drawRect(0, 12, 128, 40, SSD1306_WHITE);
+          // Simple voltage graph
+          for (int i = 0; i < GRAPH_BUFFER_SIZE - 1; i++) {
+              int idx1 = (historyIndex + i) % GRAPH_BUFFER_SIZE;
+              int idx2 = (idx1 + 1) % GRAPH_BUFFER_SIZE;
+              if (voltageHistory[idx1] > 10.0f && voltageHistory[idx2] > 10.0f) {
+                  float minV = 20.0f; float maxV = 30.0f;
+                  int y1 = 51 - (int)((voltageHistory[idx1] - minV) / (maxV - minV) * 38.0f);
+                  int y2 = 51 - (int)((voltageHistory[idx2] - minV) / (maxV - minV) * 38.0f);
+                  y1 = constrain(y1, 13, 51); y2 = constrain(y2, 13, 51);
+                  display.drawLine(i*2, y1, (i+1)*2, y2, SSD1306_WHITE);
+              }
+          }
+          display.setCursor(0, 54);
+          display.print("V Log (20-30V)");
+          break;
+
+        case 3: // Charge Summary
+          display.setCursor(0, 15);
+          display.println("Energy Log:");
+          display.print("Ah: "); display.println(integratedAh, 3);
+          display.print("Wh: "); display.println(integratedWh, 2);
+          display.print("Avg V: "); display.println(integratedAh > 0 ? integratedWh / integratedAh : 0, 2);
+          display.print("Time: "); display.print((chargerState == CHARGED_COMPLETE || chargerState == ERROR_STATE) ? (chargeEndTime - chargeStartTime)/60000 : (now - chargeStartTime)/60000);
+          display.println(" mins");
+          break;
       }
-
-      // Progress Bar
-      float minV = desiredFinalVoltage - 5.0f;
-      if (minV < 15.0f) minV = 15.0f;
-      int progress = (int)((bvFiltered - minV) / (desiredFinalVoltage - minV) * 100.0f);
-      progress = constrain(progress, 0, 100);
-      display.drawRect(0, 44, 102, 10, SSD1306_WHITE);
-      display.fillRect(2, 46, (int)(progress * 0.98f), 6, SSD1306_WHITE);
-      display.setCursor(105, 46);
-      display.print(progress); display.print("%");
-
-      display.setCursor(0, 56);
-      display.print("PWM: "); display.print(currentPwmDutyCycle);
-      display.print("/"); display.print(MAX_PWM_DUTY);
   }
 
   display.display();
