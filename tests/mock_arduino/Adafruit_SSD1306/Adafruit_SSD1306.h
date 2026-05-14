@@ -16,9 +16,13 @@ public:
     void print(const char* s) {}
     void print(float f, int p = 2) {}
     void print(int i) {}
+    void print(unsigned int i) {}
+    void print(unsigned long i) {}
     void println(const char* s) {}
     void println(float f, int p = 2) {}
     void println(int i) {}
+    void println(unsigned int i) {}
+    void println(unsigned long i) {}
     void println() {}
     void drawRect(int x, int y, int w, int h, int c) {}
     void fillRect(int x, int y, int w, int h, int c) {}

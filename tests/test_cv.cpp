@@ -13,7 +13,7 @@ struct Simulation {
         float vin = 12.0;
         float D = (float)duty / 1024.0;
         if (D >= 0.95) D = 0.95;
-        return 12.0 / (1.0 - D);
+        return vin / (1.0 - D);
     }
     void step(int duty, bool psu_on, float dt_seconds) {
         float v_out = getBoostVoltage(duty, psu_on);
@@ -28,7 +28,7 @@ int main() {
     for (int i = 0; i < 5000; ++i) {
         int rawBatV = (int)(sim.batteryVoltage / VOLTAGE_SENSE_FACTOR);
         setAnalogRead(0, rawBatV);
-        bool psu_on = (digitalRead(ATX_PS_ON_PIN) == HIGH);
+        bool psu_on = (digitalRead(ATX_PS_ON_PIN) == ATX_PSU_ON);
         float v_out = sim.getBoostVoltage(getPwmWrite(0), psu_on);
         float current = (v_out > sim.batteryVoltage) ? (v_out - sim.batteryVoltage) / 0.6 : 0;
         int rawI = (int)(current / CURRENT_RAW_TO_A) + currentSensorOffsetRaw;
