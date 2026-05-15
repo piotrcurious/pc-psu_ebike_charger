@@ -18,11 +18,14 @@ const int DESIRED_CURRENT_SET_PIN = 3;
 const int ATX_PS_ON_PIN = 9;
 const int UI_BUTTON_PIN = 4;
 const int TEMP_SENSE_PIN = 5;
-const int FAN_PWM_PIN = 6; // PWM control for cooling fan
+const int FAN_PWM_PIN = 6;
 
 // --- Signal Polarity ---
 #define ATX_PSU_ON  LOW
 #define ATX_PSU_OFF HIGH
+
+// --- PSU Nominal Input ---
+const float INPUT_VOLTAGE_NOMINAL = 12.0f;
 
 // --- PWM (LEDC) settings ---
 const int PWM_CHANNEL = 0;
@@ -31,7 +34,7 @@ const int PWM_RESOLUTION = 10;
 const int MAX_PWM_DUTY = (1 << PWM_RESOLUTION) - 1;
 
 const int FAN_PWM_CHANNEL = 1;
-const int FAN_PWM_FREQ = 25000; // Common for 4-pin fans
+const int FAN_PWM_FREQ = 25000;
 const int FAN_PWM_RES = 8;
 const int MAX_FAN_DUTY = (1 << FAN_PWM_RES) - 1;
 
@@ -61,7 +64,7 @@ const unsigned long PSU_RESTART_COOLDOWN_MS = 10000UL;
 const unsigned long MAX_CHARGE_TIME_MS = 12 * 3600 * 1000UL;
 const float MAX_CHARGE_AH_LIMIT = 20.0f;
 const int WATCHDOG_TIMEOUT_S = 8;
-const unsigned long STATS_SAVE_INTERVAL_MS = 600000UL; // 10 minutes
+const unsigned long STATS_SAVE_INTERVAL_MS = 600000UL;
 
 // --- Control Strategy Parameters ---
 const int PWM_STEP_UP = 2;
