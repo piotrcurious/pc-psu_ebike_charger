@@ -48,7 +48,19 @@ void UI::handleButton() {
     if (btnState != _lastButtonState) {
         if (now - _lastButtonChangeTime > 50) {
             if (btnState == LOW) {
-                _currentScreen = (_currentScreen + 1) % 5;
+                // Button pressed
+            } else {
+                // Button released
+                unsigned long pressDuration = now - _lastButtonChangeTime;
+                if (pressDuration > 2000) {
+                    // Long press
+                    if (_charger.state() == IDLE || _charger.state() == CHARGED_COMPLETE || _charger.state() == ERROR_STATE) {
+                        _charger.resetSession();
+                    }
+                } else {
+                    // Short press
+                    _currentScreen = (_currentScreen + 1) % 5;
+                }
             }
             _lastButtonState = btnState;
             _lastButtonChangeTime = now;
@@ -183,6 +195,13 @@ void UI::drawGraph() {
             y1 = constrain(y1, 13, 51); y2 = constrain(y2, 13, 51);
             _display.drawLine(i*2, y1, (i+1)*2, y2, SSD1306_WHITE);
         }
+    }
+    // Draw horizontal line for target voltage if within range
+    float targetV = _charger.targetVoltage();
+    if (targetV > minV && targetV < maxV) {
+        int targetY = 51 - (int)((targetV - minV) / (maxV - minV) * 38.0f);
+        targetY = constrain(targetY, 13, 51);
+        for(int x=0; x<128; x+=4) _display.drawLine(x, targetY, x+2, targetY, SSD1306_WHITE);
     }
     _display.setCursor(0, 54);
     _display.print(minV, 1); _display.print("-"); _display.print(maxV, 1); _display.print("V");

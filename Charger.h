@@ -16,6 +16,7 @@ public:
     void update(float dt);
     void calibrateCurrentSensor();
     void reset();
+    void resetSession();
 
     // Data access
     ChargerState_t state() const { return _state; }
