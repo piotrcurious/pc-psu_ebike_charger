@@ -1,4 +1,5 @@
 #include "Arduino.h"
+#include "esp_task_wdt.h"
 SerialMock Serial;
 static unsigned long _millis = 0;
 unsigned long millis() { return _millis; }
@@ -22,3 +23,6 @@ void ledcWrite(uint8_t channel, uint32_t duty) { if (channel < 16) _pwmValues[ch
 uint32_t getPwmWrite(uint8_t channel) { return (channel < 16) ? _pwmValues[channel] : 0; }
 #include "Wire/Wire.h"
 TwoWire Wire;
+void esp_task_wdt_init(int timeout, bool panic) {}
+void esp_task_wdt_add(void* handle) {}
+void esp_task_wdt_reset() {}

@@ -30,6 +30,7 @@ private:
     float _voltageHistory[GRAPH_BUFFER_SIZE];
     int _historyIndex;
     unsigned long _lastGraphUpdateTime;
+    unsigned long _lastRefreshTime;
 };
 
 #endif

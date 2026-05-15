@@ -1,5 +1,9 @@
 #include "Charger.h"
 
+#if defined(ARDUINO_ARCH_ESP32) || defined(ESP32)
+#include <esp_task_wdt.h>
+#endif
+
 Charger::Charger() :
     _state(IDLE),
     _lastError(NO_ERROR),
@@ -43,6 +47,9 @@ void Charger::setup() {
         analogSetPinAttenuation(DESIRED_VOLTAGE_SET_PIN, ADC_ATTEN_DB_11);
         analogSetPinAttenuation(DESIRED_CURRENT_SET_PIN, ADC_ATTEN_DB_11);
         analogSetPinAttenuation(TEMP_SENSE_PIN, ADC_ATTEN_DB_11);
+
+        esp_task_wdt_init(WATCHDOG_TIMEOUT_S, true);
+        esp_task_wdt_add(NULL);
     #endif
 
     calibrateCurrentSensor();
@@ -72,10 +79,15 @@ void Charger::reset() {
     _integratedAh = 0;
     _integratedWh = 0;
     _batteryInternalResistance = 0;
+    _fullConditionStartTime = 0;
     Serial.println("Charger Reset");
 }
 
 void Charger::update(float dt) {
+    #if defined(ARDUINO_ARCH_ESP32) || defined(ESP32)
+    esp_task_wdt_reset();
+    #endif
+
     unsigned long now = millis();
     static float accumulatedDt = 0;
     accumulatedDt += dt;
@@ -85,6 +97,10 @@ void Charger::update(float dt) {
 
     if (temp() > MAX_ALLOWED_TEMP) {
         handleError(OVERTEMP, "Over temperature!");
+    }
+
+    if (_integratedAh > MAX_CHARGE_AH_LIMIT) {
+        handleError(CAPACITY_LIMIT, "Charge capacity limit reached");
     }
 
     if (_state != PAUSED_CHECK_VOLTAGE && now - _lastDiagTime >= 5000) {
@@ -118,6 +134,7 @@ void Charger::update(float dt) {
                     _lastChargeCheckTime = now;
                     _chargeStartTime = now;
                     _integratedAh = 0; _integratedWh = 0;
+                    _fullConditionStartTime = 0;
                     Serial.println("State: IDLE -> CHARGING");
                 }
             }
@@ -132,9 +149,8 @@ void Charger::update(float dt) {
             if (now - _pausedStartTime < PAUSE_SETTLE_MS) return;
             readSensors();
             {
-                float vUnloaded = _batteryVoltage; // Use immediate raw reading
+                float vUnloaded = _batteryVoltage;
 
-                // Estimate internal resistance: R = (Vloaded - Vunloaded) / Iloaded
                 if (_iLoadedAtPause > 0.1f) {
                     float rEst = (_vLoadedAtPause - vUnloaded) / _iLoadedAtPause;
                     if (rEst > 0 && rEst < 5.0f) {
