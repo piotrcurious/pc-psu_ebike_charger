@@ -48,7 +48,7 @@ void UI::handleButton() {
     if (btnState != _lastButtonState) {
         if (now - _lastButtonChangeTime > 50) {
             if (btnState == LOW) {
-                _currentScreen = (_currentScreen + 1) % 4;
+                _currentScreen = (_currentScreen + 1) % 5;
             }
             _lastButtonState = btnState;
             _lastButtonChangeTime = now;
@@ -69,6 +69,7 @@ void UI::drawScreen() {
             case 1: drawLive(); break;
             case 2: drawGraph(); break;
             case 3: drawSummary(); break;
+            case 4: drawLifetime(); break;
         }
     }
     _display.display();
@@ -113,6 +114,12 @@ void UI::drawStatus() {
         _display.print("PSU: ON");
     } else {
         _display.print("PSU: OFF");
+    }
+
+    if (_charger.fanDuty() > 0) {
+        _display.print(" FAN:");
+        _display.print(_charger.fanDuty() * 100 / MAX_FAN_DUTY);
+        _display.print("%");
     }
 
     float targetV = _charger.targetVoltage();
@@ -183,11 +190,19 @@ void UI::drawGraph() {
 
 void UI::drawSummary() {
     _display.setCursor(0, 15);
-    _display.println("Energy Log:");
+    _display.println("Session Log:");
     _display.print("Ah: "); _display.println(_charger.ah(), 3);
     _display.print("Wh: "); _display.println(_charger.wh(), 2);
     _display.print("Rbat: "); _display.print(_charger.batteryInternalResistance(), 3); _display.println(" ohm");
     _display.print("Time: "); _display.print(_charger.chargeTime()/60000); _display.println(" mins");
+}
+
+void UI::drawLifetime() {
+    _display.setCursor(0, 15);
+    _display.println("Lifetime Stats:");
+    _display.print("Total Ah: "); _display.println(_charger.lifetimeAh(), 1);
+    _display.print("Total Wh: "); _display.println(_charger.lifetimeWh(), 0);
+    _display.print("Avg Eff: "); _display.println("N/A");
 }
 
 void UI::drawError() {

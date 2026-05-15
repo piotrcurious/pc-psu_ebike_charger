@@ -18,6 +18,7 @@ const int DESIRED_CURRENT_SET_PIN = 3;
 const int ATX_PS_ON_PIN = 9;
 const int UI_BUTTON_PIN = 4;
 const int TEMP_SENSE_PIN = 5;
+const int FAN_PWM_PIN = 6; // PWM control for cooling fan
 
 // --- Signal Polarity ---
 #define ATX_PSU_ON  LOW
@@ -28,6 +29,11 @@ const int PWM_CHANNEL = 0;
 const int PWM_FREQ = 50000;
 const int PWM_RESOLUTION = 10;
 const int MAX_PWM_DUTY = (1 << PWM_RESOLUTION) - 1;
+
+const int FAN_PWM_CHANNEL = 1;
+const int FAN_PWM_FREQ = 25000; // Common for 4-pin fans
+const int FAN_PWM_RES = 8;
+const int MAX_FAN_DUTY = (1 << FAN_PWM_RES) - 1;
 
 // --- ADC / Sampling ---
 const int ADC_SAMPLES = 16;
@@ -53,8 +59,9 @@ const unsigned long CHARGE_CHECK_INTERVAL_MS = 30000UL;
 const unsigned long PAUSE_SETTLE_MS = 1000UL;
 const unsigned long PSU_RESTART_COOLDOWN_MS = 10000UL;
 const unsigned long MAX_CHARGE_TIME_MS = 12 * 3600 * 1000UL;
-const float MAX_CHARGE_AH_LIMIT = 20.0f; // 20Ah max energy safety limit
+const float MAX_CHARGE_AH_LIMIT = 20.0f;
 const int WATCHDOG_TIMEOUT_S = 8;
+const unsigned long STATS_SAVE_INTERVAL_MS = 600000UL; // 10 minutes
 
 // --- Control Strategy Parameters ---
 const int PWM_STEP_UP = 2;
@@ -68,6 +75,10 @@ const float MAX_ALLOWED_TEMP = 60.0f;
 const float SOFT_START_RAMP_A_PER_S = 0.1f;
 const float FULL_CHARGE_CURRENT_THRESHOLD = 0.1f;
 
+// Fan Thresholds
+const float FAN_TEMP_MIN = 35.0f;
+const float FAN_TEMP_MAX = 55.0f;
+
 // Filters
 const float FILTER_ALPHA_V = 0.2f;
 const float FILTER_ALPHA_I = 0.2f;
@@ -76,6 +87,6 @@ const float FILTER_ALPHA_T = 0.1f;
 // --- Logging and UI ---
 #define GRAPH_BUFFER_SIZE 64
 const unsigned long GRAPH_UPDATE_INTERVAL_MS = 60000UL;
-const unsigned long UI_REFRESH_INTERVAL_MS = 200UL; // 5Hz UI update
+const unsigned long UI_REFRESH_INTERVAL_MS = 200UL;
 
 #endif
