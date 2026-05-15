@@ -7,7 +7,8 @@ UI::UI(Adafruit_SSD1306& display, Charger& charger) :
     _lastButtonState(HIGH),
     _lastButtonChangeTime(0),
     _historyIndex(0),
-    _lastGraphUpdateTime(0)
+    _lastGraphUpdateTime(0),
+    _lastRefreshTime(0)
 {
     for(int i=0; i<GRAPH_BUFFER_SIZE; i++) _voltageHistory[i] = 0.0f;
 }
@@ -34,7 +35,10 @@ void UI::update() {
         _historyIndex = (_historyIndex + 1) % GRAPH_BUFFER_SIZE;
     }
 
-    drawScreen();
+    if (now - _lastRefreshTime >= UI_REFRESH_INTERVAL_MS) {
+        _lastRefreshTime = now;
+        drawScreen();
+    }
 }
 
 void UI::handleButton() {
@@ -195,6 +199,7 @@ void UI::drawError() {
         case TIMEOUT: _display.println("TIMEOUT"); break;
         case DISCONNECTED: _display.println("DISCONNECTED"); break;
         case OVERTEMP: _display.println("OVERTEMP"); break;
+        case CAPACITY_LIMIT: _display.println("CAPACITY LIMIT"); break;
         default: _display.println("UNKNOWN ERROR"); break;
     }
     _display.println("\nReset required.");
