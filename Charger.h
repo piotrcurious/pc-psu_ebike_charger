@@ -27,6 +27,7 @@ public:
     unsigned long chargeTime() const;
     int pwmDuty() const { return _currentPwmDuty; }
     bool isPsuOn() const;
+    float batteryInternalResistance() const { return _batteryInternalResistance; }
 
     // Setpoints
     float targetVoltage() const { return _targetVoltage; }
@@ -61,6 +62,7 @@ private:
 
     float _integratedAh;
     float _integratedWh;
+    float _batteryInternalResistance;
 
     unsigned long _chargeStartTime;
     unsigned long _chargeEndTime;
@@ -68,6 +70,10 @@ private:
     unsigned long _pausedStartTime;
     unsigned long _lastPsuOffTime;
     unsigned long _lastDiagTime;
+    unsigned long _fullConditionStartTime;
+
+    float _vLoadedAtPause;
+    float _iLoadedAtPause;
 };
 
 #endif

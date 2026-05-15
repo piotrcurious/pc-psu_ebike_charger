@@ -16,12 +16,16 @@ Charger::Charger() :
     _currentOffsetRaw(2048),
     _integratedAh(0),
     _integratedWh(0),
+    _batteryInternalResistance(0),
     _chargeStartTime(0),
     _chargeEndTime(0),
     _lastChargeCheckTime(0),
     _pausedStartTime(0),
     _lastPsuOffTime(0),
-    _lastDiagTime(0)
+    _lastDiagTime(0),
+    _fullConditionStartTime(0),
+    _vLoadedAtPause(0),
+    _iLoadedAtPause(0)
 {}
 
 void Charger::setup() {
@@ -67,6 +71,7 @@ void Charger::reset() {
     _tempFilter.reset();
     _integratedAh = 0;
     _integratedWh = 0;
+    _batteryInternalResistance = 0;
     Serial.println("Charger Reset");
 }
 
@@ -76,7 +81,7 @@ void Charger::update(float dt) {
     accumulatedDt += dt;
 
     readSensors();
-    updateIntegrators(dt); // Always integrate time slices for accuracy
+    updateIntegrators(dt);
 
     if (temp() > MAX_ALLOWED_TEMP) {
         handleError(OVERTEMP, "Over temperature!");
@@ -90,6 +95,7 @@ void Charger::update(float dt) {
         Serial.print(" Temp="); Serial.print(temp(), 1);
         Serial.print(" PWM="); Serial.print(_currentPwmDuty);
         Serial.print(" Ah="); Serial.print(_integratedAh, 4);
+        Serial.print(" Rbat="); Serial.print(_batteryInternalResistance, 3);
         Serial.print(" PSU="); Serial.println(isPsuOn() ? "ON" : "OFF");
     }
 
@@ -125,17 +131,30 @@ void Charger::update(float dt) {
             setPwm(0);
             if (now - _pausedStartTime < PAUSE_SETTLE_MS) return;
             readSensors();
-            if (_batteryVoltage >= _targetVoltage - 0.1f) {
-                Serial.println("Final voltage reached - State: CHARGED_COMPLETE");
-                _chargeEndTime = now;
-                setPsu(false);
-                _state = CHARGED_COMPLETE;
-            } else if (_batteryVoltage < MIN_BATTERY_VOLTAGE) {
-                handleError(DISCONNECTED, "Battery disconnected");
-            } else {
-                Serial.println("Voltage not reached - State: CHARGING");
-                _state = CHARGING;
-                _lastChargeCheckTime = now;
+            {
+                float vUnloaded = _batteryVoltage; // Use immediate raw reading
+
+                // Estimate internal resistance: R = (Vloaded - Vunloaded) / Iloaded
+                if (_iLoadedAtPause > 0.1f) {
+                    float rEst = (_vLoadedAtPause - vUnloaded) / _iLoadedAtPause;
+                    if (rEst > 0 && rEst < 5.0f) {
+                        if (_batteryInternalResistance == 0) _batteryInternalResistance = rEst;
+                        else _batteryInternalResistance = (0.2f * rEst) + (0.8f * _batteryInternalResistance);
+                    }
+                }
+
+                if (vUnloaded >= _targetVoltage - 0.1f) {
+                    Serial.println("Final voltage reached - State: CHARGED_COMPLETE");
+                    _chargeEndTime = now;
+                    setPsu(false);
+                    _state = CHARGED_COMPLETE;
+                } else if (vUnloaded < MIN_BATTERY_VOLTAGE) {
+                    handleError(DISCONNECTED, "Battery disconnected");
+                } else {
+                    Serial.println("Voltage not reached - State: CHARGING");
+                    _state = CHARGING;
+                    _lastChargeCheckTime = now;
+                }
             }
             break;
 
@@ -198,23 +217,24 @@ void Charger::handleCharging(unsigned long now, float dt) {
     }
     setPwm(nextPwm);
 
-    static unsigned long fullConditionStart = 0;
     if (bvFiltered >= (_targetVoltage - 0.1f) && iFiltered < FULL_CHARGE_CURRENT_THRESHOLD) {
-        if (fullConditionStart == 0) fullConditionStart = now;
-        if (now - fullConditionStart > 10000) {
+        if (_fullConditionStartTime == 0) _fullConditionStartTime = now;
+        if (now - _fullConditionStartTime > 10000) {
             Serial.println("Battery full - State: CHARGED_COMPLETE");
             _chargeEndTime = now;
             setPsu(false);
             _state = CHARGED_COMPLETE;
-            fullConditionStart = 0;
+            _fullConditionStartTime = 0;
             return;
         }
     } else {
-        fullConditionStart = 0;
+        _fullConditionStartTime = 0;
     }
 
     if (now - _lastChargeCheckTime >= CHARGE_CHECK_INTERVAL_MS) {
         Serial.println("Periodic check - pausing PWM");
+        _vLoadedAtPause = bvFiltered;
+        _iLoadedAtPause = iFiltered;
         setPwm(0);
         _pausedStartTime = now;
         _state = PAUSED_CHECK_VOLTAGE;

@@ -42,8 +42,8 @@ void UI::handleButton() {
     unsigned long now = millis();
 
     if (btnState != _lastButtonState) {
-        if (now - _lastButtonChangeTime > 50) { // Debounce
-            if (btnState == LOW) { // Pressed
+        if (now - _lastButtonChangeTime > 50) {
+            if (btnState == LOW) {
                 _currentScreen = (_currentScreen + 1) % 4;
             }
             _lastButtonState = btnState;
@@ -111,7 +111,6 @@ void UI::drawStatus() {
         _display.print("PSU: OFF");
     }
 
-    // Progress Bar
     float targetV = _charger.targetVoltage();
     float minV = targetV - 5.0f;
     if (minV < 15.0f) minV = 15.0f;
@@ -183,7 +182,7 @@ void UI::drawSummary() {
     _display.println("Energy Log:");
     _display.print("Ah: "); _display.println(_charger.ah(), 3);
     _display.print("Wh: "); _display.println(_charger.wh(), 2);
-    _display.print("Avg V: "); _display.println(_charger.ah() > 0 ? _charger.wh() / _charger.ah() : 0, 2);
+    _display.print("Rbat: "); _display.print(_charger.batteryInternalResistance(), 3); _display.println(" ohm");
     _display.print("Time: "); _display.print(_charger.chargeTime()/60000); _display.println(" mins");
 }
 
