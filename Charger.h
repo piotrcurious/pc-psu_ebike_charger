@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include "config.h"
 #include "Filter.h"
+#include "Storage.h"
 
 enum ChargerState_t { IDLE, CHARGING, PAUSED_CHECK_VOLTAGE, CHARGED_COMPLETE, ERROR_STATE };
 enum ErrorType_t { NO_ERROR, OVERCURRENT, TIMEOUT, DISCONNECTED, OVERTEMP, CAPACITY_LIMIT };
@@ -24,8 +25,11 @@ public:
     float temp() const { return _tempFilter.value(); }
     float ah() const { return _integratedAh; }
     float wh() const { return _integratedWh; }
+    float lifetimeAh() const { return _lifetimeAh + _integratedAh; }
+    float lifetimeWh() const { return _lifetimeWh + _integratedWh; }
     unsigned long chargeTime() const;
     int pwmDuty() const { return _currentPwmDuty; }
+    int fanDuty() const { return _fanDuty; }
     bool isPsuOn() const;
     float batteryInternalResistance() const { return _batteryInternalResistance; }
 
@@ -38,6 +42,8 @@ private:
     float calculateTemp(int rawADC);
     void setPwm(int duty);
     void setPsu(bool on);
+    void setFan(int duty);
+    void updateFan();
     void handleError(ErrorType_t type, const char* msg);
     void handleCharging(unsigned long now, float dt);
     void updateIntegrators(float dt);
@@ -57,11 +63,14 @@ private:
     float _currentLimit;
     float _softStartLimit;
     int _currentPwmDuty;
+    int _fanDuty;
 
     int _currentOffsetRaw;
 
     float _integratedAh;
     float _integratedWh;
+    float _lifetimeAh;
+    float _lifetimeWh;
     float _batteryInternalResistance;
 
     unsigned long _chargeStartTime;
@@ -70,10 +79,13 @@ private:
     unsigned long _pausedStartTime;
     unsigned long _lastPsuOffTime;
     unsigned long _lastDiagTime;
+    unsigned long _lastSaveTime;
     unsigned long _fullConditionStartTime;
 
     float _vLoadedAtPause;
     float _iLoadedAtPause;
+
+    ChargerStorage _storage;
 };
 
 #endif

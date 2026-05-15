@@ -18,6 +18,7 @@ private:
     void drawLive();
     void drawGraph();
     void drawSummary();
+    void drawLifetime();
     void drawError();
 
     Adafruit_SSD1306& _display;

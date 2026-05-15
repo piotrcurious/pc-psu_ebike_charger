@@ -17,9 +17,12 @@ Charger::Charger() :
     _currentLimit(1.0),
     _softStartLimit(0.05),
     _currentPwmDuty(0),
+    _fanDuty(0),
     _currentOffsetRaw(2048),
     _integratedAh(0),
     _integratedWh(0),
+    _lifetimeAh(0),
+    _lifetimeWh(0),
     _batteryInternalResistance(0),
     _chargeStartTime(0),
     _chargeEndTime(0),
@@ -27,6 +30,7 @@ Charger::Charger() :
     _pausedStartTime(0),
     _lastPsuOffTime(0),
     _lastDiagTime(0),
+    _lastSaveTime(0),
     _fullConditionStartTime(0),
     _vLoadedAtPause(0),
     _iLoadedAtPause(0)
@@ -40,6 +44,10 @@ void Charger::setup() {
     ledcAttachPin(PWM_OUT_PIN, PWM_CHANNEL);
     setPwm(0);
 
+    ledcSetup(FAN_PWM_CHANNEL, FAN_PWM_FREQ, FAN_PWM_RES);
+    ledcAttachPin(FAN_PWM_PIN, FAN_PWM_CHANNEL);
+    setFan(0);
+
     #if defined(ARDUINO_ARCH_ESP32) || defined(ESP32)
         analogReadResolution(12);
         analogSetPinAttenuation(BAT_VOLTAGE_SENSE_PIN, ADC_ATTEN_DB_11);
@@ -52,9 +60,14 @@ void Charger::setup() {
         esp_task_wdt_add(NULL);
     #endif
 
+    _storage.begin();
+    _lifetimeAh = _storage.lifetimeAh();
+    _lifetimeWh = _storage.lifetimeWh();
+
     calibrateCurrentSensor();
     readSensors();
     _lastChargeCheckTime = millis();
+    _lastSaveTime = millis();
 }
 
 void Charger::calibrateCurrentSensor() {
@@ -94,6 +107,7 @@ void Charger::update(float dt) {
 
     readSensors();
     updateIntegrators(dt);
+    updateFan();
 
     if (temp() > MAX_ALLOWED_TEMP) {
         handleError(OVERTEMP, "Over temperature!");
@@ -103,19 +117,24 @@ void Charger::update(float dt) {
         handleError(CAPACITY_LIMIT, "Charge capacity limit reached");
     }
 
+    if (now - _lastSaveTime >= STATS_SAVE_INTERVAL_MS) {
+        _lastSaveTime = now;
+        _storage.save(_lifetimeAh + _integratedAh, _lifetimeWh + _integratedWh);
+        Serial.println("Lifetime stats saved to Flash");
+    }
+
     if (_state != PAUSED_CHECK_VOLTAGE && now - _lastDiagTime >= 5000) {
         _lastDiagTime = now;
         Serial.print("DIAG: State="); Serial.print((int)_state);
         Serial.print(" Vbat="); Serial.print(vBat(), 2);
         Serial.print(" Ichg="); Serial.print(iChg(), 3);
         Serial.print(" Temp="); Serial.print(temp(), 1);
-        Serial.print(" PWM="); Serial.print(_currentPwmDuty);
+        Serial.print(" Fan="); Serial.print(_fanDuty);
         Serial.print(" Ah="); Serial.print(_integratedAh, 4);
-        Serial.print(" Rbat="); Serial.print(_batteryInternalResistance, 3);
+        Serial.print(" LAh="); Serial.print(lifetimeAh(), 2);
         Serial.print(" PSU="); Serial.println(isPsuOn() ? "ON" : "OFF");
     }
 
-    // Logic update throttle
     if (_state != PAUSED_CHECK_VOLTAGE && accumulatedDt < 0.05f) return;
     float logicDt = accumulatedDt;
     accumulatedDt = 0;
@@ -150,7 +169,6 @@ void Charger::update(float dt) {
             readSensors();
             {
                 float vUnloaded = _batteryVoltage;
-
                 if (_iLoadedAtPause > 0.1f) {
                     float rEst = (_vLoadedAtPause - vUnloaded) / _iLoadedAtPause;
                     if (rEst > 0 && rEst < 5.0f) {
@@ -158,12 +176,14 @@ void Charger::update(float dt) {
                         else _batteryInternalResistance = (0.2f * rEst) + (0.8f * _batteryInternalResistance);
                     }
                 }
-
                 if (vUnloaded >= _targetVoltage - 0.1f) {
                     Serial.println("Final voltage reached - State: CHARGED_COMPLETE");
                     _chargeEndTime = now;
                     setPsu(false);
                     _state = CHARGED_COMPLETE;
+                    _storage.save(_lifetimeAh + _integratedAh, _lifetimeWh + _integratedWh);
+                    _lifetimeAh += _integratedAh; _lifetimeWh += _integratedWh;
+                    _integratedAh = 0; _integratedWh = 0;
                 } else if (vUnloaded < MIN_BATTERY_VOLTAGE) {
                     handleError(DISCONNECTED, "Battery disconnected");
                 } else {
@@ -203,7 +223,6 @@ void Charger::handleCharging(unsigned long now, float dt) {
         handleError(TIMEOUT, "Charge timeout");
         return;
     }
-
     setPsu(true);
     if (!isPsuOn()) return;
 
@@ -241,6 +260,9 @@ void Charger::handleCharging(unsigned long now, float dt) {
             setPsu(false);
             _state = CHARGED_COMPLETE;
             _fullConditionStartTime = 0;
+            _storage.save(_lifetimeAh + _integratedAh, _lifetimeWh + _integratedWh);
+            _lifetimeAh += _integratedAh; _lifetimeWh += _integratedWh;
+            _integratedAh = 0; _integratedWh = 0;
             return;
         }
     } else {
@@ -281,8 +303,7 @@ float Charger::calculateTemp(int rawADC) {
     float voltage = rawADC * ADC_V_PER_COUNT;
     if (voltage >= 3.25f) return 25.0f;
     float resistance = NTC_R_SERIES * (voltage / (3.3f - voltage));
-    float steinhart;
-    steinhart = resistance / NTC_NOMINAL_R;
+    float steinhart = resistance / NTC_NOMINAL_R;
     steinhart = log(steinhart);
     steinhart /= NTC_BETA;
     steinhart += 1.0f / (NTC_NOMINAL_T + 273.15f);
@@ -301,9 +322,24 @@ void Charger::updateIntegrators(float dt) {
     }
 }
 
+void Charger::updateFan() {
+    float t = temp();
+    if (t < FAN_TEMP_MIN) {
+        setFan(0);
+    } else {
+        float duty = (t - FAN_TEMP_MIN) / (FAN_TEMP_MAX - FAN_TEMP_MIN) * MAX_FAN_DUTY;
+        setFan((int)duty);
+    }
+}
+
 void Charger::setPwm(int duty) {
     _currentPwmDuty = constrain(duty, 0, MAX_PWM_DUTY);
     ledcWrite(PWM_CHANNEL, _currentPwmDuty);
+}
+
+void Charger::setFan(int duty) {
+    _fanDuty = constrain(duty, 0, MAX_FAN_DUTY);
+    ledcWrite(FAN_PWM_CHANNEL, _fanDuty);
 }
 
 void Charger::setPsu(bool on) {
@@ -342,7 +378,9 @@ void Charger::handleError(ErrorType_t type, const char* msg) {
     _state = ERROR_STATE;
     setPwm(0);
     setPsu(false);
+    setFan(MAX_FAN_DUTY); // Cool down after error
     _chargeEndTime = millis();
+    _storage.save(_lifetimeAh + _integratedAh, _lifetimeWh + _integratedWh);
 }
 
 int Charger::analogReadAveraged(int pin) {
