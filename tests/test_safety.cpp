@@ -157,10 +157,27 @@ void test_timeout() {
     }
 }
 
+void test_sensor_fault() {
+    std::cout << "Testing Sensor Fault protection..." << std::endl;
+    Charger charger;
+    charger.setup();
+
+    // ADC Overvoltage on battery sense pin
+    setAnalogRead(BAT_VOLTAGE_SENSE_PIN, 4095); // 3.3V > 3.25V threshold
+    for(int i=0; i<32; i++) charger.update(0.1);
+
+    if (charger.state() == ERROR_STATE && charger.lastError() == SENSOR_FAULT) {
+        std::cout << "Sensor fault test PASSED" << std::endl;
+    } else {
+        std::cout << "Sensor fault test FAILED! State: " << (int)charger.state() << " Error: " << (int)charger.lastError() << std::endl;
+    }
+}
+
 int main() {
     test_overtemp();
     test_overcurrent();
     test_capacity_limit();
     test_timeout();
+    test_sensor_fault();
     return 0;
 }

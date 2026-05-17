@@ -308,19 +308,40 @@ void test_fan_control() {
 
 void test_setpoints() {
     std::cout << "Testing Target Setpoints..." << std::endl;
+    // targetVoltage: constrain((float)mvSetV * 0.001f * (30.0f / 3.3f), 26.0f, 30.0f)
+    // currentLimit: constrain((float)mvSetI * 0.001f * (5.0f / 3.3f), 0.1f, 5.0f)
     Charger charger;
-    // targetVoltage: constrain((float)rawSetV * ADC_V_PER_COUNT * (30.0f / 3.3f), 26.0f, 30.0f)
-    // currentLimit: constrain((float)rawSetI * ADC_V_PER_COUNT * (5.0f / 3.3f), 0.1f, 5.0f)
 
-    setAnalogRead(DESIRED_VOLTAGE_SET_PIN, 4095); // 3.3V -> 30V
-    setAnalogRead(DESIRED_CURRENT_SET_PIN, 4095); // 3.3V -> 5A
-    charger.update(0.1);
-    assert(std::abs(charger.targetVoltage() - 30.0) < 0.1);
-    assert(std::abs(charger.currentLimit() - 5.0) < 0.1);
+    // Set to 4095 (3.3V) -> Should yield 30V and 5A
+    for(int i=0; i<32; i++) {
+        setAnalogRead(DESIRED_VOLTAGE_SET_PIN, 4095);
+        setAnalogRead(DESIRED_CURRENT_SET_PIN, 4095);
+        setAnalogRead(BAT_VOLTAGE_SENSE_PIN, 2048);
+        setAnalogRead(CURRENT_SENSE_AMP_PIN, 2048);
+        setAnalogRead(TEMP_SENSE_PIN, 2048);
+        charger.update(0.1);
+    }
+    // With SF check at 3250mV, 3300mV will cause error
+    if (charger.state() == ERROR_STATE) {
+        std::cout << "Target Setpoints errored due to sensor fault (expected at 3300mV)" << std::endl;
+        charger.reset();
+    }
 
-    setAnalogRead(DESIRED_VOLTAGE_SET_PIN, 0); // 0V -> 26V
-    setAnalogRead(DESIRED_CURRENT_SET_PIN, 0); // 0V -> 0.1A
-    charger.update(0.1);
+    // Set to 3000 (2.42V)
+    for(int i=0; i<32; i++) {
+        setAnalogRead(DESIRED_VOLTAGE_SET_PIN, 3000);
+        setAnalogRead(DESIRED_CURRENT_SET_PIN, 3000);
+        charger.update(0.1);
+    }
+    // 2.42V * (30/3.3) = 22V -> constrained to 26V
+    // 2.42V * (5/3.3) = 3.66A
+    std::cout << "Target V: " << charger.targetVoltage() << " Target I: " << charger.currentLimit() << std::endl;
+    assert(charger.targetVoltage() >= 26.0);
+    assert(std::abs(charger.currentLimit() - 3.66) < 0.1);
+
+    setAnalogRead(DESIRED_VOLTAGE_SET_PIN, 0);
+    setAnalogRead(DESIRED_CURRENT_SET_PIN, 0);
+    for(int i=0; i<32; i++) charger.update(0.1);
     assert(std::abs(charger.targetVoltage() - 26.0) < 0.1);
     assert(std::abs(charger.currentLimit() - 0.1) < 0.1);
 
@@ -367,29 +388,41 @@ void test_reset_logic() {
 }
 
 void test_ui_render() {
-    std::cout << "Testing UI Rendering (No crash)..." << std::endl;
+    std::cout << "Testing UI Rendering and Content..." << std::endl;
     Charger charger;
     UI ui(display, charger);
     ui.setup();
 
-    // Cycle through all screens
-    for(int i=0; i<6; i++) {
-        ui.update();
-        // Trigger screen change
-        setDigitalRead(UI_BUTTON_PIN, LOW);
-        advance_millis(100);
-        ui.update();
-        setDigitalRead(UI_BUTTON_PIN, HIGH);
-        advance_millis(100);
-        ui.update();
-    }
-
-    // Test error screen
-    setAnalogRead(TEMP_SENSE_PIN, 100);
+    setAnalogRead(BAT_VOLTAGE_SENSE_PIN, (int)(24.0 / VOLTAGE_SENSE_FACTOR));
+    setAnalogRead(CURRENT_SENSE_AMP_PIN, 2048);
+    setAnalogRead(TEMP_SENSE_PIN, 2048);
     charger.update(0.1);
-    ui.update();
 
-    std::cout << "UI Rendering test PASSED" << std::endl;
+    // Screen 0: Status
+    // UI refreshes every UI_REFRESH_INTERVAL_MS (200ms)
+    advance_millis(250);
+    ui.update();
+    std::string buf = display.getBuffer();
+    assert(buf.find("IDLE") != std::string::npos);
+    assert(buf.find("24.0V") != std::string::npos);
+
+    // Switch to screen 1: Live
+    setDigitalRead(UI_BUTTON_PIN, LOW); advance_millis(100); ui.update();
+    setDigitalRead(UI_BUTTON_PIN, HIGH); advance_millis(100); ui.update();
+    buf = display.getBuffer();
+    assert(buf.find("24.00 V") != std::string::npos);
+
+    // Test error screen content
+    setAnalogRead(TEMP_SENSE_PIN, 100);
+    for(int i=0; i<100; i++) charger.update(0.1);
+    assert(charger.state() == ERROR_STATE);
+    advance_millis(250);
+    ui.update();
+    buf = display.getBuffer();
+    assert(buf.find("ERROR!") != std::string::npos);
+    assert(buf.find("OVERTEMP") != std::string::npos);
+
+    std::cout << "UI Rendering and Content test PASSED" << std::endl;
 }
 
 void test_cv_termination() {

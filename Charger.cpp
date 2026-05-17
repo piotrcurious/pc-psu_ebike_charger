@@ -307,6 +307,12 @@ void Charger::readSensors() {
     uint32_t mvSetI = analogReadMilliVoltsAveraged(DESIRED_CURRENT_SET_PIN);
     uint32_t mvTemp = analogReadMilliVoltsAveraged(TEMP_SENSE_PIN);
 
+    // Basic sensor sanity check
+    if (mvBat > 3250 || mvSetV > 3250 || mvSetI > 3250) {
+         handleError(SENSOR_FAULT, "ADC Overvoltage");
+         return;
+    }
+
     _batteryVoltage = (float)mvBat * 0.001f * VOLTAGE_DIVIDER_RATIO;
     _chargingCurrent = (float)((int)mvI - _currentOffsetRaw) * 0.001f / ACS712_SENSITIVITY;
     _temperature = calculateTemp(mvTemp);

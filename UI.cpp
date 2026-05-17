@@ -263,6 +263,7 @@ void UI::drawError() {
         case DISCONNECTED: _display.println("DISCONNECTED"); break;
         case OVERTEMP: _display.println("OVERTEMP"); break;
         case CAPACITY_LIMIT: _display.println("CAPACITY LIMIT"); break;
+        case SENSOR_FAULT: _display.println("SENSOR FAULT"); break;
         default: _display.println("UNKNOWN ERROR"); break;
     }
     _display.println("\nReset required.");
