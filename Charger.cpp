@@ -343,10 +343,10 @@ float Charger::calculateTemp(int rawADC) {
 void Charger::updateIntegrators(float dt) {
     if (_state == CHARGING) {
         float i = iChg();
-        if (i > 0) {
-            _integratedAh += (i * dt) / 3600.0f;
-            _integratedWh += (i * vBat() * dt) / 3600.0f;
-        }
+        // Integration should be correct regardless of sign,
+        // though physically it should be positive here.
+        _integratedAh += (i * dt) / 3600.0f;
+        _integratedWh += (i * vBat() * dt) / 3600.0f;
     }
 }
 
