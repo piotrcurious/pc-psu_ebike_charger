@@ -54,12 +54,14 @@ void UI::handleButton() {
                 unsigned long pressDuration = now - _lastButtonChangeTime;
                 if (pressDuration > 2000) {
                     // Long press
-                    if (_charger.state() == IDLE || _charger.state() == CHARGED_COMPLETE || _charger.state() == ERROR_STATE) {
+                    if (_currentScreen == 5) {
+                        _charger.calibrateCurrentSensor();
+                    } else if (_charger.state() == IDLE || _charger.state() == CHARGED_COMPLETE || _charger.state() == ERROR_STATE) {
                         _charger.resetSession();
                     }
                 } else {
                     // Short press
-                    _currentScreen = (_currentScreen + 1) % 5;
+                    _currentScreen = (_currentScreen + 1) % 6;
                 }
             }
             _lastButtonState = btnState;
@@ -82,6 +84,7 @@ void UI::drawScreen() {
             case 2: drawGraph(); break;
             case 3: drawSummary(); break;
             case 4: drawLifetime(); break;
+            case 5: drawDiagnostics(); break;
         }
     }
     _display.display();
@@ -212,8 +215,22 @@ void UI::drawSummary() {
     _display.println("Session Log:");
     _display.print("Ah: "); _display.println(_charger.ah(), 3);
     _display.print("Wh: "); _display.println(_charger.wh(), 2);
-    _display.print("Rbat: "); _display.print(_charger.batteryInternalResistance(), 3); _display.println(" ohm");
-    _display.print("Time: "); _display.print(_charger.chargeTime()/60000); _display.println(" mins");
+    _display.print("R: "); _display.print(_charger.batteryInternalResistance(), 3); _display.println(" R");
+    _display.print("T: "); _display.print(_charger.chargeTime()/60000); _display.println(" m");
+
+    if (_charger.state() == ERROR_STATE) {
+        _display.setTextColor(0, 1); // 0=BLACK, 1=WHITE
+        _display.print("ERR: ");
+        switch(_charger.lastError()) {
+            case OVERCURRENT: _display.println("OC"); break;
+            case TIMEOUT: _display.println("TO"); break;
+            case DISCONNECTED: _display.println("DC"); break;
+            case OVERTEMP: _display.println("OT"); break;
+            case CAPACITY_LIMIT: _display.println("CL"); break;
+            default: _display.println("??"); break;
+        }
+        _display.setTextColor(SSD1306_WHITE);
+    }
 }
 
 void UI::drawLifetime() {
@@ -222,6 +239,18 @@ void UI::drawLifetime() {
     _display.print("Total Ah: "); _display.println(_charger.lifetimeAh(), 1);
     _display.print("Total Wh: "); _display.println(_charger.lifetimeWh(), 0);
     _display.print("Avg Eff: "); _display.println("N/A");
+}
+
+void UI::drawDiagnostics() {
+    _display.setCursor(0, 15);
+    _display.println("System Diagnostics:");
+    _display.print("R_int: "); _display.print(_charger.batteryInternalResistance(), 3); _display.println(" R");
+    _display.print("I_off: "); _display.println(_charger.currentOffsetRaw());
+    _display.print("Target: "); _display.print(_charger.targetVoltage(), 1); _display.println("V");
+    _display.print("Limit: "); _display.print(_charger.currentLimit(), 1); _display.println("A");
+    _display.setCursor(0, 56);
+    _display.setTextSize(1);
+    _display.println("Hold to Calibrate I");
 }
 
 void UI::drawError() {

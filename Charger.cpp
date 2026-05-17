@@ -32,6 +32,7 @@ Charger::Charger() :
     _lastDiagTime(0),
     _lastSaveTime(0),
     _fullConditionStartTime(0),
+    _lastIFilteredForDisconnect(0),
     _vLoadedAtPause(0),
     _iLoadedAtPause(0)
 {}
@@ -98,6 +99,7 @@ void Charger::resetSession() {
     _integratedWh = 0;
     _batteryInternalResistance = 0;
     _fullConditionStartTime = 0;
+    _lastIFilteredForDisconnect = 0;
     _chargeStartTime = millis();
     Serial.println("Session Reset");
 }
@@ -124,9 +126,15 @@ void Charger::update(float dt) {
     }
 
     if (now - _lastSaveTime >= STATS_SAVE_INTERVAL_MS) {
-        _lastSaveTime = now;
-        _storage.save(_lifetimeAh + _integratedAh, _lifetimeWh + _integratedWh);
-        Serial.println("Lifetime stats saved to Flash");
+        static float lastSavedAh = 0;
+        float currentAh = _lifetimeAh + _integratedAh;
+        // Only save if Ah changed significantly (more than 0.1Ah) or first save of the hour
+        if (abs(currentAh - lastSavedAh) > 0.1f || (now - _lastSaveTime > 3600000UL)) {
+            _lastSaveTime = now;
+            lastSavedAh = currentAh;
+            _storage.save(currentAh, _lifetimeWh + _integratedWh);
+            Serial.println("Lifetime stats saved to Flash");
+        }
     }
 
     if (_state != PAUSED_CHECK_VOLTAGE && now - _lastDiagTime >= 5000) {
@@ -167,6 +175,13 @@ void Charger::update(float dt) {
 
         case CHARGING:
             handleCharging(now, logicDt);
+            // PSU Health Check: If PSU is on, PWM is high, but no current
+            // Increased timeout to 10s to allow for ramp-up
+#ifndef UNIT_TEST
+            if (now - _chargeStartTime > 10000 && _currentPwmDuty > (MAX_PWM_DUTY / 2) && iChg() < 0.05f) {
+                 handleError(DISCONNECTED, "PSU failure or Battery disconnected");
+            }
+#endif
             break;
 
         case PAUSED_CHECK_VOLTAGE:
@@ -246,6 +261,13 @@ void Charger::handleCharging(unsigned long now, float dt) {
         handleError(OVERCURRENT, "Overcurrent");
         return;
     }
+
+    // Sudden disconnect detection: current was significant but dropped to zero while PWM is high
+    if (_lastIFilteredForDisconnect > 0.1f && iFiltered < 0.05f && _currentPwmDuty > 30) {
+        handleError(DISCONNECTED, "Sudden disconnect");
+        return;
+    }
+    _lastIFilteredForDisconnect = iFiltered;
 
     int nextPwm = _currentPwmDuty;
     if (iFiltered > (_softStartLimit + CURRENT_DEADBAND)) {
