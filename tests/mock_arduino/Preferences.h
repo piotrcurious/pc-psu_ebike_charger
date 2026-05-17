@@ -13,6 +13,6 @@ public:
     }
     void end() {}
 private:
-    std::map<std::string, float> _data;
+    static std::map<std::string, float> _data;
 };
 #endif
