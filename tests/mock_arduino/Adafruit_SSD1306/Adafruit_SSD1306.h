@@ -12,6 +12,7 @@ public:
     void clearDisplay() {}
     void setTextSize(int s) {}
     void setTextColor(int c) {}
+    void setTextColor(int c, int bg) {}
     void setCursor(int x, int y) {}
     void print(const char* s) {}
     void print(float f, int p = 2) {}

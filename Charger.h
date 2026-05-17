@@ -33,6 +33,7 @@ public:
     int fanDuty() const { return _fanDuty; }
     bool isPsuOn() const;
     float batteryInternalResistance() const { return _batteryInternalResistance; }
+    int currentOffsetRaw() const { return _currentOffsetRaw; }
 
     // Setpoints
     float targetVoltage() const { return _targetVoltage; }
@@ -83,6 +84,7 @@ private:
     unsigned long _lastSaveTime;
     unsigned long _fullConditionStartTime;
 
+    float _lastIFilteredForDisconnect;
     float _vLoadedAtPause;
     float _iLoadedAtPause;
 
