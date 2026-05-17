@@ -18,24 +18,24 @@ public:
 #endif
     }
 
-    void save(float ah, float wh) {
+    void save(double ah, double wh) {
         _lifetimeAh = ah;
         _lifetimeWh = wh;
 #if defined(ARDUINO_ARCH_ESP32) || defined(ESP32)
-        _prefs.putFloat("ah", _lifetimeAh);
-        _prefs.putFloat("wh", _lifetimeWh);
+        _prefs.putFloat("ah", (float)_lifetimeAh);
+        _prefs.putFloat("wh", (float)_lifetimeWh);
 #endif
     }
 
-    float lifetimeAh() const { return _lifetimeAh; }
-    float lifetimeWh() const { return _lifetimeWh; }
+    double lifetimeAh() const { return _lifetimeAh; }
+    double lifetimeWh() const { return _lifetimeWh; }
 
 private:
 #if defined(ARDUINO_ARCH_ESP32) || defined(ESP32)
     Preferences _prefs;
 #endif
-    float _lifetimeAh;
-    float _lifetimeWh;
+    double _lifetimeAh;
+    double _lifetimeWh;
 };
 
 #endif

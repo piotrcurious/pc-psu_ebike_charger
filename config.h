@@ -19,6 +19,8 @@ const int ATX_PS_ON_PIN = 9;
 const int UI_BUTTON_PIN = 4;
 const int TEMP_SENSE_PIN = 5;
 const int FAN_PWM_PIN = 6;
+const int SDA_PIN = 8;
+const int SCL_PIN = 7;
 
 // --- Signal Polarity ---
 #define ATX_PSU_ON  LOW
@@ -60,7 +62,7 @@ const float NTC_BETA = 3950.0f;
 // --- Timing and Safety Limits ---
 const unsigned long CHARGE_CHECK_INTERVAL_MS = 30000UL;
 const unsigned long PAUSE_SETTLE_MS = 1000UL;
-const unsigned long PSU_RESTART_COOLDOWN_MS = 10000UL;
+const unsigned long PSU_RESTART_COOLDOWN_MS = 20000UL;
 const unsigned long MAX_CHARGE_TIME_MS = 12 * 3600 * 1000UL;
 const float MAX_CHARGE_AH_LIMIT = 20.0f;
 const int WATCHDOG_TIMEOUT_S = 8;

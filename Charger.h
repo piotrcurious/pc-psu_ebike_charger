@@ -24,10 +24,10 @@ public:
     float vBat() const { return _vBatFilter.value(); }
     float iChg() const { return _iChgFilter.value(); }
     float temp() const { return _tempFilter.value(); }
-    float ah() const { return _integratedAh; }
-    float wh() const { return _integratedWh; }
-    float lifetimeAh() const { return _lifetimeAh + _integratedAh; }
-    float lifetimeWh() const { return _lifetimeWh + _integratedWh; }
+    double ah() const { return _integratedAh; }
+    double wh() const { return _integratedWh; }
+    double lifetimeAh() const { return _lifetimeAh + _integratedAh; }
+    double lifetimeWh() const { return _lifetimeWh + _integratedWh; }
     unsigned long chargeTime() const;
     int pwmDuty() const { return _currentPwmDuty; }
     int fanDuty() const { return _fanDuty; }
@@ -41,7 +41,7 @@ public:
 
 private:
     void readSensors();
-    float calculateTemp(int rawADC);
+    float calculateTemp(uint32_t mv);
     void setPwm(int duty);
     void setPsu(bool on);
     void setFan(int duty);
@@ -49,7 +49,7 @@ private:
     void handleError(ErrorType_t type, const char* msg);
     void handleCharging(unsigned long now, float dt);
     void updateIntegrators(float dt);
-    int analogReadAveraged(int pin);
+    uint32_t analogReadMilliVoltsAveraged(int pin);
 
     ChargerState_t _state;
     ErrorType_t _lastError;
@@ -69,10 +69,10 @@ private:
 
     int _currentOffsetRaw;
 
-    float _integratedAh;
-    float _integratedWh;
-    float _lifetimeAh;
-    float _lifetimeWh;
+    double _integratedAh;
+    double _integratedWh;
+    double _lifetimeAh;
+    double _lifetimeWh;
     float _batteryInternalResistance;
 
     unsigned long _chargeStartTime;

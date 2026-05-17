@@ -75,13 +75,8 @@ void Charger::calibrateCurrentSensor() {
     setPwm(0);
     setPsu(false);
     delay(1000);
-    long sum = 0;
-    for (int i = 0; i < CALIBRATION_SAMPLES; ++i) {
-        sum += analogRead(CURRENT_SENSE_AMP_PIN);
-        delay(2);
-    }
-    _currentOffsetRaw = (int)(sum / CALIBRATION_SAMPLES);
-    Serial.print("ACS712 Calibrated. Offset: "); Serial.println(_currentOffsetRaw);
+    _currentOffsetRaw = analogReadMilliVoltsAveraged(CURRENT_SENSE_AMP_PIN);
+    Serial.print("ACS712 Calibrated. Offset: "); Serial.print(_currentOffsetRaw); Serial.println(" mV");
 }
 
 void Charger::reset() {
@@ -126,10 +121,10 @@ void Charger::update(float dt) {
     }
 
     if (now - _lastSaveTime >= STATS_SAVE_INTERVAL_MS) {
-        static float lastSavedAh = 0;
-        float currentAh = _lifetimeAh + _integratedAh;
+        static double lastSavedAh = 0;
+        double currentAh = _lifetimeAh + _integratedAh;
         // Only save if Ah changed significantly (more than 0.1Ah) or first save of the hour
-        if (abs(currentAh - lastSavedAh) > 0.1f || (now - _lastSaveTime > 3600000UL)) {
+        if (std::abs(currentAh - lastSavedAh) > 0.1 || (now - _lastSaveTime > 3600000UL)) {
             _lastSaveTime = now;
             lastSavedAh = currentAh;
             _storage.save(currentAh, _lifetimeWh + _integratedWh);
@@ -177,11 +172,9 @@ void Charger::update(float dt) {
             handleCharging(now, logicDt);
             // PSU Health Check: If PSU is on, PWM is high, but no current
             // Increased timeout to 10s to allow for ramp-up
-#ifndef UNIT_TEST
-            if (now - _chargeStartTime > 10000 && _currentPwmDuty > (MAX_PWM_DUTY / 2) && iChg() < 0.05f) {
+            if (now - _chargeStartTime > 20000 && _currentPwmDuty > 200 && iChg() < 0.05f) {
                  handleError(DISCONNECTED, "PSU failure or Battery disconnected");
             }
-#endif
             break;
 
         case PAUSED_CHECK_VOLTAGE:
@@ -308,27 +301,27 @@ void Charger::handleCharging(unsigned long now, float dt) {
 }
 
 void Charger::readSensors() {
-    int rawBat = analogReadAveraged(BAT_VOLTAGE_SENSE_PIN);
-    int rawI = analogReadAveraged(CURRENT_SENSE_AMP_PIN);
-    int rawSetV = analogReadAveraged(DESIRED_VOLTAGE_SET_PIN);
-    int rawSetI = analogReadAveraged(DESIRED_CURRENT_SET_PIN);
-    int rawTemp = analogReadAveraged(TEMP_SENSE_PIN);
+    uint32_t mvBat = analogReadMilliVoltsAveraged(BAT_VOLTAGE_SENSE_PIN);
+    uint32_t mvI = analogReadMilliVoltsAveraged(CURRENT_SENSE_AMP_PIN);
+    uint32_t mvSetV = analogReadMilliVoltsAveraged(DESIRED_VOLTAGE_SET_PIN);
+    uint32_t mvSetI = analogReadMilliVoltsAveraged(DESIRED_CURRENT_SET_PIN);
+    uint32_t mvTemp = analogReadMilliVoltsAveraged(TEMP_SENSE_PIN);
 
-    _batteryVoltage = (float)rawBat * VOLTAGE_SENSE_FACTOR;
-    _chargingCurrent = (float)(rawI - _currentOffsetRaw) * CURRENT_RAW_TO_A;
-    _temperature = calculateTemp(rawTemp);
+    _batteryVoltage = (float)mvBat * 0.001f * VOLTAGE_DIVIDER_RATIO;
+    _chargingCurrent = (float)((int)mvI - _currentOffsetRaw) * 0.001f / ACS712_SENSITIVITY;
+    _temperature = calculateTemp(mvTemp);
 
     _vBatFilter.update(_batteryVoltage);
     _iChgFilter.update(_chargingCurrent);
     _tempFilter.update(_temperature);
 
-    _targetVoltage = constrain((float)rawSetV * ADC_V_PER_COUNT * (30.0f / 3.3f), 26.0f, 30.0f);
-    _currentLimit = constrain((float)rawSetI * ADC_V_PER_COUNT * (5.0f / 3.3f), 0.1f, 5.0f);
+    _targetVoltage = constrain((float)mvSetV * 0.001f * (30.0f / 3.3f), 26.0f, 30.0f);
+    _currentLimit = constrain((float)mvSetI * 0.001f * (5.0f / 3.3f), 0.1f, 5.0f);
 }
 
-float Charger::calculateTemp(int rawADC) {
-    if (rawADC == 0 || rawADC >= 4095) return 25.0f;
-    float voltage = rawADC * ADC_V_PER_COUNT;
+float Charger::calculateTemp(uint32_t mv) {
+    if (mv == 0 || mv >= 3300) return 25.0f;
+    float voltage = mv * 0.001f;
     if (voltage >= 3.25f) return 25.0f;
     float resistance = NTC_R_SERIES * (voltage / (3.3f - voltage));
     float steinhart = resistance / NTC_NOMINAL_R;
@@ -345,8 +338,8 @@ void Charger::updateIntegrators(float dt) {
         float i = iChg();
         // Integration should be correct regardless of sign,
         // though physically it should be positive here.
-        _integratedAh += (i * dt) / 3600.0f;
-        _integratedWh += (i * vBat() * dt) / 3600.0f;
+        _integratedAh += ((double)i * (double)dt) / 3600.0;
+        _integratedWh += ((double)i * (double)vBat() * (double)dt) / 3600.0;
     }
 }
 
@@ -411,10 +404,14 @@ void Charger::handleError(ErrorType_t type, const char* msg) {
     _storage.save(_lifetimeAh + _integratedAh, _lifetimeWh + _integratedWh);
 }
 
-int Charger::analogReadAveraged(int pin) {
-    long sum = 0;
+uint32_t Charger::analogReadMilliVoltsAveraged(int pin) {
+    uint32_t sum = 0;
     for (int i = 0; i < ADC_SAMPLES; ++i) {
-        sum += analogRead(pin);
+#if defined(ARDUINO_ARCH_ESP32) || defined(ESP32)
+        sum += analogReadMilliVolts(pin);
+#else
+        sum += (uint32_t)((float)analogRead(pin) * 3300.0f / 4095.0f);
+#endif
     }
-    return (int)(sum / ADC_SAMPLES);
+    return sum / ADC_SAMPLES;
 }

@@ -23,6 +23,7 @@ int digitalRead(uint8_t pin);
 int analogRead(uint8_t pin);
 void analogReadResolution(int res);
 void analogSetPinAttenuation(int pin, int atten);
+uint32_t analogReadMilliVolts(uint8_t pin);
 unsigned long millis();
 void delay(unsigned long ms);
 void delayMicroseconds(unsigned int us);
