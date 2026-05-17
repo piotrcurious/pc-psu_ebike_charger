@@ -89,11 +89,17 @@ void Charger::reset() {
     _vBatFilter.reset();
     _iChgFilter.reset();
     _tempFilter.reset();
+    resetSession();
+    Serial.println("Charger Reset");
+}
+
+void Charger::resetSession() {
     _integratedAh = 0;
     _integratedWh = 0;
     _batteryInternalResistance = 0;
     _fullConditionStartTime = 0;
-    Serial.println("Charger Reset");
+    _chargeStartTime = millis();
+    Serial.println("Session Reset");
 }
 
 void Charger::update(float dt) {
@@ -135,7 +141,7 @@ void Charger::update(float dt) {
         Serial.print(" PSU="); Serial.println(isPsuOn() ? "ON" : "OFF");
     }
 
-    if (_state != PAUSED_CHECK_VOLTAGE && accumulatedDt < 0.05f) return;
+    if (_state != PAUSED_CHECK_VOLTAGE && accumulatedDt < 0.02f) return;
     float logicDt = accumulatedDt;
     accumulatedDt = 0;
 
@@ -387,7 +393,6 @@ int Charger::analogReadAveraged(int pin) {
     long sum = 0;
     for (int i = 0; i < ADC_SAMPLES; ++i) {
         sum += analogRead(pin);
-        delayMicroseconds(100);
     }
     return (int)(sum / ADC_SAMPLES);
 }
