@@ -35,6 +35,9 @@ int digitalRead(uint8_t pin) { return (pin < 16) ? _digitalValues[pin] : 0; }
 void setDigitalRead(uint8_t pin, uint8_t val) { if (pin < 16) _digitalValues[pin] = val; }
 void analogReadResolution(int res) {}
 void analogSetPinAttenuation(int pin, int atten) {}
+uint32_t analogReadMilliVolts(uint8_t pin) {
+    return (uint32_t)((float)analogRead(pin) * 3300.0f / 4095.0f);
+}
 static uint32_t _pwmValues[16] = {0};
 void ledcSetup(uint8_t channel, double freq, uint8_t resolution_bits) {}
 void ledcAttachPin(uint8_t pin, uint8_t channel) {}

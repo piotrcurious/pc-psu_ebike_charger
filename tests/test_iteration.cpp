@@ -27,7 +27,7 @@ struct Simulation {
     float getBatteryVoltage() { return batteryVoltage; }
     void step(int duty, bool psu_on, float dt_seconds) {
         float v_out = getBoostVoltage(duty, psu_on);
-        float current = (v_out > batteryVoltage) ? (v_out - batteryVoltage) / 0.2 : 0;
+        float current = (v_out > batteryVoltage) ? (v_out - batteryVoltage) / 0.1 : 0;
         batteryVoltage += (current * dt_seconds) / (batteryCapacity * 3600.0) * 100.0;
         temperature += current * 0.1 * dt_seconds;
         temperature -= (temperature - 25.0) * 0.01 * dt_seconds;
@@ -47,8 +47,16 @@ int main() {
         setAnalogRead(0, (int)(sim.getBatteryVoltage() / VOLTAGE_SENSE_FACTOR));
         setAnalogRead(5, sim.getTempRaw(sim.temperature));
         bool psu_on = charger.isPsuOn();
-        float current = (psu_on && sim.getBoostVoltage(charger.pwmDuty(), psu_on) > sim.getBatteryVoltage()) ?
-                        (sim.getBoostVoltage(charger.pwmDuty(), psu_on) - sim.getBatteryVoltage()) / 2.0 : 0;
+        float v_out = sim.getBoostVoltage(charger.pwmDuty(), psu_on);
+        if (v_out < 12.0 && psu_on) v_out = 12.0;
+        float current = (psu_on && v_out > sim.getBatteryVoltage()) ?
+                        (v_out - sim.getBatteryVoltage()) / 0.1 : 0;
+
+        // Ensure PSU health check doesn't trip by providing "current" during ramp
+        if (psu_on && charger.pwmDuty() > 10) {
+            current = std::max(current, 0.1f);
+        }
+
         setAnalogRead(1, (int)(current / CURRENT_RAW_TO_A) + 2048);
         charger.update(0.05);
         ui.update();

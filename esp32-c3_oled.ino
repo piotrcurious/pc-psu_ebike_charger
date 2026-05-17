@@ -16,8 +16,8 @@ void setup() {
   Serial.begin(115200);
   delay(10);
 
-  // Initialize I2C for OLED on ESP32-C3 default pins (or user specified)
-  Wire.begin(8, 7);
+  // Initialize I2C for OLED on ESP32-C3 specified pins
+  Wire.begin(SDA_PIN, SCL_PIN);
 
   charger.setup();
   ui.setup();
