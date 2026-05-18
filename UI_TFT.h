@@ -1,13 +1,12 @@
-#ifndef UI_H
-#define UI_H
+#ifndef UI_TFT_H
+#define UI_TFT_H
 
-#include <Adafruit_SSD1306.h>
+#include "LGFX_Config.h"
 #include "Charger.h"
 
-#if !defined(ESP32_WROOM_TFT)
-class UI {
+class UI_TFT {
 public:
-    UI(Adafruit_SSD1306& display, Charger& charger);
+    UI_TFT(LGFX& tft, Charger& charger);
     void setup();
     void update();
 
@@ -23,7 +22,7 @@ private:
     void drawDiagnostics();
     void drawError();
 
-    Adafruit_SSD1306& _display;
+    LGFX& _tft;
     Charger& _charger;
 
     int _currentScreen;
@@ -34,7 +33,8 @@ private:
     int _historyIndex;
     unsigned long _lastGraphUpdateTime;
     unsigned long _lastRefreshTime;
+
+    uint32_t getStatusColor();
 };
-#endif
 
 #endif

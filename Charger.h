@@ -2,7 +2,11 @@
 #define CHARGER_H
 
 #include <Arduino.h>
+#if defined(ESP32_WROOM_TFT)
+#include "config_esp32.h"
+#else
 #include "config.h"
+#endif
 #include "Filter.h"
 #include "Storage.h"
 
