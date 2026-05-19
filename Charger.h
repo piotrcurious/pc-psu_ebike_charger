@@ -11,7 +11,7 @@
 #include "Storage.h"
 
 enum ChargerState_t { IDLE, CHARGING, PAUSED_CHECK_VOLTAGE, CHARGED_COMPLETE, ERROR_STATE };
-enum ErrorType_t { NO_ERROR, OVERCURRENT, TIMEOUT, DISCONNECTED, OVERTEMP, CAPACITY_LIMIT, SENSOR_FAULT };
+enum ErrorType_t { NO_ERROR, OVERCURRENT, TIMEOUT, DISCONNECTED, OVERTEMP, CAPACITY_LIMIT, SENSOR_FAULT, OVERVOLTAGE };
 
 class Charger {
 public:
@@ -37,6 +37,7 @@ public:
     int fanDuty() const { return _fanDuty; }
     bool isPsuOn() const;
     float batteryInternalResistance() const { return _batteryInternalResistance; }
+    float vBatOC() const;
     int currentOffsetRaw() const { return _currentOffsetRaw; }
 
     // Setpoints

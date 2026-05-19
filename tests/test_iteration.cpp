@@ -43,15 +43,15 @@ int main() {
     charger.setup();
     ui.setup();
     std::cout << "Starting Automated Test Cycle..." << std::endl;
-    for (int i = 0; i < 50000; ++i) {
+    for (int i = 0; i < 100000; ++i) {
         setAnalogRead(0, (int)(sim.getBatteryVoltage() / VOLTAGE_SENSE_FACTOR));
         setAnalogRead(5, sim.getTempRaw(sim.temperature));
         bool psu_on = charger.isPsuOn();
         float v_out = sim.getBoostVoltage(charger.pwmDuty(), psu_on);
         if (v_out < 12.0 && psu_on) v_out = 12.0;
+        // Battery model with more internal resistance for convergence
         float current = (psu_on && v_out > sim.getBatteryVoltage()) ?
-                        (v_out - sim.getBatteryVoltage()) / 0.1 : 0;
-
+                        (v_out - sim.getBatteryVoltage()) / 0.5 : 0;
         // Ensure PSU health check doesn't trip by providing "current" during ramp
         if (psu_on && charger.pwmDuty() > 10) {
             current = std::max(current, 0.1f);

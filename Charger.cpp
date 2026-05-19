@@ -1,4 +1,5 @@
 #include "Charger.h"
+#include <cmath>
 
 #if defined(ARDUINO_ARCH_ESP32) || defined(ESP32)
 #include <esp_task_wdt.h>
@@ -114,6 +115,10 @@ void Charger::update(float dt) {
 
     if (temp() > MAX_ALLOWED_TEMP) {
         handleError(OVERTEMP, "Over temperature!");
+    }
+
+    if (_state == CHARGING && vBatOC() > (_targetVoltage + 0.5f)) {
+        handleError(OVERVOLTAGE, "Voltage limit exceeded (Voc)");
     }
 
     if (_integratedAh > MAX_CHARGE_AH_LIMIT) {
@@ -263,13 +268,22 @@ void Charger::handleCharging(unsigned long now, float dt) {
     _lastIFilteredForDisconnect = iFiltered;
 
     int nextPwm = _currentPwmDuty;
-    if (iFiltered > (_softStartLimit + CURRENT_DEADBAND)) {
-        nextPwm -= PWM_STEP_DOWN_FAST;
-    } else if (bvFiltered > (_targetVoltage + VOLTAGE_DEADBAND)) {
-        nextPwm -= PWM_STEP_DOWN_SLOW;
-    } else if (iFiltered < (_softStartLimit - CURRENT_DEADBAND) &&
-               bvFiltered < (_targetVoltage - VOLTAGE_DEADBAND)) {
-        nextPwm += PWM_STEP_UP;
+    float iError = iFiltered - _softStartLimit;
+    float vError = bvFiltered - _targetVoltage;
+
+    if (iError > CURRENT_DEADBAND) {
+        // Over current: Step down proportional to error
+        int step = (int)(iError * 5.0f) + 1;
+        nextPwm -= constrain(step, 1, 20);
+    } else if (vError > VOLTAGE_DEADBAND) {
+        // Over voltage: Step down proportional to error
+        int step = (int)(vError * 10.0f) + 1;
+        nextPwm -= constrain(step, 1, 5);
+    } else if (iError < -CURRENT_DEADBAND && vError < -VOLTAGE_DEADBAND) {
+        // Under both limits: Step up
+        float error = min(-iError, -vError);
+        int step = (int)(error * 2.0f) + 1;
+        nextPwm += constrain(step, 1, PWM_STEP_UP * 2);
     }
     setPwm(nextPwm);
 
@@ -390,6 +404,12 @@ void Charger::setPsu(bool on) {
 
 bool Charger::isPsuOn() const {
     return (digitalRead(ATX_PS_ON_PIN) == ATX_PSU_ON);
+}
+
+float Charger::vBatOC() const {
+    if (_batteryInternalResistance <= 0) return vBat();
+    float voc = vBat() - (iChg() * _batteryInternalResistance);
+    return max(voc, 0.0f);
 }
 
 unsigned long Charger::chargeTime() const {

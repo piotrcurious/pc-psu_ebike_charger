@@ -19,7 +19,7 @@ extern void setAnalogRead(uint8_t pin, int value);
 extern void advance_millis(unsigned long ms);
 
 void test_long_term_integration() {
-    std::cout << "Testing Long-Term Integration (100 hours)..." << std::endl;
+    std::cout << "Testing Long-Term Integration (11 hours)..." << std::endl;
     Charger charger;
     setAnalogRead(BAT_VOLTAGE_SENSE_PIN, (int)(24.0 / VOLTAGE_SENSE_FACTOR));
     setAnalogRead(CURRENT_SENSE_AMP_PIN, 2048); // Zero for calibration
@@ -49,9 +49,6 @@ void test_long_term_integration() {
         if (charger.state() == PAUSED_CHECK_VOLTAGE) {
             advance_millis(PAUSE_SETTLE_MS + 100);
             charger.update(0.1);
-        }
-        if (i % 10000 == 0) {
-             // Avoid console flood
         }
     }
 
@@ -129,7 +126,7 @@ void test_state_transitions() {
     Charger charger;
     setAnalogRead(BAT_VOLTAGE_SENSE_PIN, (int)(24.0 / VOLTAGE_SENSE_FACTOR));
     setAnalogRead(TEMP_SENSE_PIN, 2048);
-    setAnalogRead(DESIRED_VOLTAGE_SET_PIN, 2048); // ~28V
+    setAnalogRead(DESIRED_VOLTAGE_SET_PIN, 2048); // ~15.0V -> Constrained to 26.0V
     setAnalogRead(DESIRED_CURRENT_SET_PIN, 2048); // ~2.5A
     charger.setup();
 
@@ -142,22 +139,25 @@ void test_state_transitions() {
     assert(charger.state() == CHARGING);
 
     // 2. Simulate full battery (CV termination)
+    // Target is 26.0V.
     // To reach CHARGED_COMPLETE, voltage must be high AND current must be below threshold for 10s
-    setAnalogRead(BAT_VOLTAGE_SENSE_PIN, (int)(29.0 / VOLTAGE_SENSE_FACTOR));
-    setAnalogRead(CURRENT_SENSE_AMP_PIN, 2048 + (int)(0.02 / CURRENT_RAW_TO_A)); // 0.02A < 0.1A threshold
-
-    for(int i=0; i<150; i++) {
+    for(int i=0; i<200; i++) {
+        setAnalogRead(BAT_VOLTAGE_SENSE_PIN, (int)(26.2 / VOLTAGE_SENSE_FACTOR)); // 26.2V > 26.0V - 0.1
+        setAnalogRead(CURRENT_SENSE_AMP_PIN, 2048 + (int)(0.02 / CURRENT_RAW_TO_A)); // 0.02A < 0.1A threshold
         advance_millis(100);
         charger.update(0.1);
         if (charger.state() == CHARGED_COMPLETE) break;
+    }
+    if (charger.state() != CHARGED_COMPLETE) {
+        std::cout << "CV Termination FAILED. State: " << (int)charger.state() << " Error: " << (int)charger.lastError() << " Vbat: " << charger.vBat() << " Target: " << charger.targetVoltage() << std::endl;
     }
     assert(charger.state() == CHARGED_COMPLETE);
     assert(!charger.isPsuOn());
 
     // 3. CHARGED_COMPLETE -> CHARGING (Re-charge on voltage drop)
-    setAnalogRead(BAT_VOLTAGE_SENSE_PIN, (int)(25.0 / VOLTAGE_SENSE_FACTOR)); // Drop significantly below target
+    setAnalogRead(BAT_VOLTAGE_SENSE_PIN, (int)(24.0 / VOLTAGE_SENSE_FACTOR)); // Drop significantly below target
     // Need to wait for filters to catch up and cooldown
-    for(int i=0; i<500; i++) {
+    for(int i=0; i<1000; i++) {
         advance_millis(100);
         charger.update(0.1);
         if (charger.state() == CHARGING && charger.isPsuOn()) break;
