@@ -244,8 +244,9 @@ void UI::drawLifetime() {
 void UI::drawDiagnostics() {
     _display.setCursor(0, 15);
     _display.println("System Diagnostics:");
-    _display.print("R_int: "); _display.print(_charger.batteryInternalResistance(), 3); _display.println(" R");
-    _display.print("I_off: "); _display.println(_charger.currentOffsetRaw());
+    _display.print("Voc: "); _display.print(_charger.vBatOC(), 2); _display.println(" V");
+    _display.print("Rbat: "); _display.print(_charger.batteryInternalResistance(), 3); _display.println(" R");
+    _display.print("Ioff: "); _display.print(_charger.currentOffsetRaw()); _display.println(" mV");
     _display.print("Target: "); _display.print(_charger.targetVoltage(), 1); _display.println("V");
     _display.print("Limit: "); _display.print(_charger.currentLimit(), 1); _display.println("A");
     _display.setCursor(0, 56);

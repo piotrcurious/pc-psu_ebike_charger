@@ -271,9 +271,9 @@ void UI_TFT::drawDiagnostics() {
 
     _tft.setTextColor(TFT_WHITE);
     _tft.setCursor(10, 70);
-    _tft.printf("I_offset: %d mV", _charger.currentOffsetRaw());
+    _tft.printf("Est Voc:  %.2f V", _charger.vBatOC());
     _tft.setCursor(10, 100);
-    _tft.printf("ADC Vbat: %d mV", (int)(_charger.vBat() / VOLTAGE_DIVIDER_RATIO * 1000));
+    _tft.printf("I_offset: %d mV", _charger.currentOffsetRaw());
     _tft.setCursor(10, 130);
     _tft.printf("Target:   %.2f V", _charger.targetVoltage());
     _tft.setCursor(10, 160);
