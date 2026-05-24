@@ -13,7 +13,6 @@ const int TFT_SCLK = 18;
 const int TFT_CS   = 5;
 const int TFT_DC   = 2;
 const int TFT_RST  = 4;
-const int TFT_BL   = 32;
 
 // --- Pin Definitions (GPIO numbers for classic ESP32) ---
 const int PWM_OUT_PIN = 25;
@@ -25,7 +24,7 @@ const int ATX_PS_ON_PIN = 26;
 const int UI_BUTTON_PIN = 27;
 const int TEMP_SENSE_PIN = 39;
 const int FAN_PWM_PIN = 14;
-const int TFT_BL_PIN = 12;
+const int TFT_BL_PIN = 32;
 
 // --- Signal Polarity ---
 #define ATX_PSU_ON  LOW
@@ -77,6 +76,7 @@ const float CURRENT_DEADBAND = 0.05f;
 const float MIN_BATTERY_VOLTAGE = 15.0f;
 const float MAX_ALLOWED_CURRENT_MULTIPLIER = 2.0f;
 const float MAX_ALLOWED_TEMP = 60.0f;
+const float MIN_ALLOWED_TEMP = 0.0f;
 const float SOFT_START_RAMP_A_PER_S = 0.1f;
 const float FULL_CHARGE_CURRENT_THRESHOLD = 0.1f;
 

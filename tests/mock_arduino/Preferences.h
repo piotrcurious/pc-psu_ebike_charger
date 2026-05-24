@@ -11,7 +11,13 @@ public:
         if (_data.find(key) != _data.end()) return _data[key];
         return defaultVal;
     }
+    void putInt(const char* key, int val) { _data[key] = (float)val; }
+    int getInt(const char* key, int defaultVal) {
+        if (_data.find(key) != _data.end()) return (int)_data[key];
+        return defaultVal;
+    }
     void end() {}
+    static void clear() { _data.clear(); }
 private:
     static std::map<std::string, float> _data;
 };

@@ -77,6 +77,7 @@ const float CURRENT_DEADBAND = 0.05f;
 const float MIN_BATTERY_VOLTAGE = 15.0f;
 const float MAX_ALLOWED_CURRENT_MULTIPLIER = 2.0f;
 const float MAX_ALLOWED_TEMP = 60.0f;
+const float MIN_ALLOWED_TEMP = 0.0f;
 const float SOFT_START_RAMP_A_PER_S = 0.1f;
 const float FULL_CHARGE_CURRENT_THRESHOLD = 0.1f;
 

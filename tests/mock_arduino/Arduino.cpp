@@ -1,5 +1,6 @@
 #include "Arduino.h"
 #include "esp_task_wdt.h"
+#include <iostream>
 SerialMock Serial;
 static unsigned long _millis = 0;
 unsigned long millis() { return _millis; }
@@ -16,8 +17,10 @@ int analogRead(uint8_t pin) {
         int val = _analogQueue[pin][_analogQueueHead[pin]];
         _analogQueueHead[pin] = (_analogQueueHead[pin] + 1) % 128;
         _analogQueueSize[pin]--;
+        // std::cout << "analogRead(queue) pin=" << (int)pin << " val=" << val << std::endl;
         return val;
     }
+    // std::cout << "analogRead(fixed) pin=" << (int)pin << " val=" << _analogValues[pin] << std::endl;
     return (pin < 64) ? _analogValues[pin] : 0;
 }
 void setAnalogRead(uint8_t pin, int value) { if (pin < 64) _analogValues[pin] = value; }
@@ -26,6 +29,14 @@ void queueAnalogRead(uint8_t pin, int value) {
         int tail = (_analogQueueHead[pin] + _analogQueueSize[pin]) % 128;
         _analogQueue[pin][tail] = value;
         _analogQueueSize[pin]++;
+        // // std::cout << "queueAnalogRead pin=" << (int)pin << " val=" << value << " size=" << _analogQueueSize[pin] << std::endl;
+    }
+}
+
+void clearAnalogQueue(uint8_t pin) {
+    if (pin < 64) {
+        _analogQueueSize[pin] = 0;
+        _analogQueueHead[pin] = 0;
     }
 }
 static uint8_t _digitalValues[64] = {0};
@@ -36,7 +47,10 @@ void setDigitalRead(uint8_t pin, uint8_t val) { if (pin < 64) _digitalValues[pin
 void analogReadResolution(int res) {}
 void analogSetPinAttenuation(int pin, int atten) {}
 uint32_t analogReadMilliVolts(uint8_t pin) {
-    return (uint32_t)((float)analogRead(pin) * 3300.0f / 4095.0f);
+    int raw = analogRead(pin);
+    uint32_t val = (uint32_t)((float)raw * 3300.0f / 4095.0f);
+    // std::cout << "analogReadMilliVolts pin=" << (int)pin << " raw=" << raw << " mv=" << val << std::endl;
+    return val;
 }
 static uint32_t _pwmValues[16] = {0};
 void ledcSetup(uint8_t channel, double freq, uint8_t resolution_bits) {}

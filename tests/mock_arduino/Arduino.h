@@ -24,6 +24,7 @@ void setDigitalRead(uint8_t pin, uint8_t val);
 int analogRead(uint8_t pin);
 void setAnalogRead(uint8_t pin, int value);
 void queueAnalogRead(uint8_t pin, int value);
+void clearAnalogQueue(uint8_t pin);
 void analogReadResolution(int res);
 void analogSetPinAttenuation(int pin, int atten);
 uint32_t analogReadMilliVolts(uint8_t pin);
