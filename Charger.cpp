@@ -65,8 +65,16 @@ void Charger::setup() {
     _storage.begin();
     _lifetimeAh = _storage.lifetimeAh();
     _lifetimeWh = _storage.lifetimeWh();
+    _currentOffsetRaw = _storage.currentOffsetRaw();
 
-    calibrateCurrentSensor();
+    // If offset is still at default, or we want to force calibration on startup, we can call it.
+    // However, the user might prefer faster startup. Let's stick to saved offset but recalibrate
+    // if requested via UI (which is already supported by long-press).
+    // For safety, if offset is exactly default 2048, we calibrate once.
+    if (_currentOffsetRaw == 2048) {
+        calibrateCurrentSensor();
+    }
+
     readSensors();
     _lastChargeCheckTime = millis();
     _lastSaveTime = millis();
@@ -77,6 +85,7 @@ void Charger::calibrateCurrentSensor() {
     setPsu(false);
     delay(1000);
     _currentOffsetRaw = analogReadMilliVoltsAveraged(CURRENT_SENSE_AMP_PIN);
+    _storage.saveOffset(_currentOffsetRaw);
     Serial.print("ACS712 Calibrated. Offset: "); Serial.print(_currentOffsetRaw); Serial.println(" mV");
 }
 
@@ -115,6 +124,9 @@ void Charger::update(float dt) {
 
     if (temp() > MAX_ALLOWED_TEMP) {
         handleError(OVERTEMP, "Over temperature!");
+    }
+    if (temp() < MIN_ALLOWED_TEMP) {
+        handleError(OVERTEMP, "Under temperature!");
     }
 
     if (_state == CHARGING && vBatOC() > (_targetVoltage + 0.5f)) {
@@ -273,17 +285,17 @@ void Charger::handleCharging(unsigned long now, float dt) {
 
     if (iError > CURRENT_DEADBAND) {
         // Over current: Step down proportional to error
-        int step = (int)(iError * 5.0f) + 1;
-        nextPwm -= constrain(step, 1, 20);
+        int step = (int)(iError * 10.0f) + 1;
+        nextPwm -= constrain(step, 1, 50);
     } else if (vError > VOLTAGE_DEADBAND) {
         // Over voltage: Step down proportional to error
-        int step = (int)(vError * 10.0f) + 1;
-        nextPwm -= constrain(step, 1, 5);
+        int step = (int)(vError * 20.0f) + 1;
+        nextPwm -= constrain(step, 1, 10);
     } else if (iError < -CURRENT_DEADBAND && vError < -VOLTAGE_DEADBAND) {
         // Under both limits: Step up
         float error = min(-iError, -vError);
-        int step = (int)(error * 2.0f) + 1;
-        nextPwm += constrain(step, 1, PWM_STEP_UP * 2);
+        int step = (int)(error * 5.0f) + 1;
+        nextPwm += constrain(step, 1, PWM_STEP_UP * 4);
     }
     setPwm(nextPwm);
 
@@ -433,7 +445,9 @@ void Charger::handleError(ErrorType_t type, const char* msg) {
 uint32_t Charger::analogReadMilliVoltsAveraged(int pin) {
     uint32_t sum = 0;
     for (int i = 0; i < ADC_SAMPLES; ++i) {
-#if defined(ARDUINO_ARCH_ESP32) || defined(ESP32)
+#if defined(UNIT_TEST)
+        sum += analogReadMilliVolts(pin);
+#elif defined(ARDUINO_ARCH_ESP32) || defined(ESP32)
         sum += analogReadMilliVolts(pin);
 #else
         sum += (uint32_t)((float)analogRead(pin) * 3300.0f / 4095.0f);

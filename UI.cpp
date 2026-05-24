@@ -242,13 +242,21 @@ void UI::drawLifetime() {
 }
 
 void UI::drawDiagnostics() {
-    _display.setCursor(0, 15);
-    _display.println("System Diagnostics:");
-    _display.print("Voc: "); _display.print(_charger.vBatOC(), 2); _display.println(" V");
-    _display.print("Rbat: "); _display.print(_charger.batteryInternalResistance(), 3); _display.println(" R");
-    _display.print("Ioff: "); _display.print(_charger.currentOffsetRaw()); _display.println(" mV");
-    _display.print("Target: "); _display.print(_charger.targetVoltage(), 1); _display.println("V");
-    _display.print("Limit: "); _display.print(_charger.currentLimit(), 1); _display.println("A");
+    _display.setCursor(0, 12);
+    _display.print("Voc:"); _display.print(_charger.vBatOC(), 2);
+    _display.print(" R:"); _display.print(_charger.batteryInternalResistance(), 2);
+
+    _display.setCursor(0, 22);
+    _display.print("Ioff:"); _display.print(_charger.currentOffsetRaw()); _display.print("mV");
+
+    _display.setCursor(0, 32);
+    _display.print("Vtar:"); _display.print(_charger.targetVoltage(), 1);
+    _display.print(" Itar:"); _display.print(_charger.currentLimit(), 1);
+
+    _display.setCursor(0, 42);
+    _display.print("Isoft:"); _display.print(_charger.softStartLimit(), 2);
+    _display.print(" Fan:"); _display.print(_charger.fanDuty());
+
     _display.setCursor(0, 56);
     _display.setTextSize(1);
     _display.println("Hold to Calibrate I");

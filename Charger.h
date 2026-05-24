@@ -43,6 +43,7 @@ public:
     // Setpoints
     float targetVoltage() const { return _targetVoltage; }
     float currentLimit() const { return _currentLimit; }
+    float softStartLimit() const { return _softStartLimit; }
 
 private:
     void readSensors();
